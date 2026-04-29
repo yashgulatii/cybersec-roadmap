@@ -13,15 +13,37 @@ export default function App() {
     if (saved) {
       setCompleted(new Set(JSON.parse(saved)));
     }
-    const editSaved = sessionStorage.getItem('roadmap_edit');
-    if (editSaved === '1') {
+    
+    // Fetch latest progress from the server
+    fetch('/api/progress')
+      .then(res => res.json())
+      .then(data => {
+        if (data.progress) {
+          setCompleted(new Set(data.progress));
+          localStorage.setItem('roadmap_progress', JSON.stringify(data.progress));
+        }
+      })
+      .catch(e => console.error("Could not fetch remote progress", e));
+
+    const editKey = sessionStorage.getItem('roadmap_edit_key');
+    if (editKey) {
       setIsEditMode(true);
     }
   }, []);
 
   const saveCompleted = (newSet) => {
     setCompleted(newSet);
-    localStorage.setItem('roadmap_progress', JSON.stringify(Array.from(newSet)));
+    const progressArr = Array.from(newSet);
+    localStorage.setItem('roadmap_progress', JSON.stringify(progressArr));
+
+    const editKey = sessionStorage.getItem('roadmap_edit_key');
+    if (editKey) {
+      fetch('/api/progress', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: editKey, progress: progressArr })
+      }).catch(e => console.error("Could not sync progress", e));
+    }
   };
 
   const toggleTopic = (globalIndex) => {
@@ -38,15 +60,15 @@ export default function App() {
     saveCompleted(newSet);
   };
 
-  const unlockEdit = () => {
+  const unlockEdit = (pw) => {
     setIsEditMode(true);
-    sessionStorage.setItem('roadmap_edit', '1');
+    sessionStorage.setItem('roadmap_edit_key', pw);
     setShowAuthModal(false);
   };
 
   const lockEdit = () => {
     setIsEditMode(false);
-    sessionStorage.removeItem('roadmap_edit');
+    sessionStorage.removeItem('roadmap_edit_key');
   };
 
   const stats = useMemo(() => {
@@ -223,7 +245,7 @@ function AuthModal({ onClose, onUnlock }) {
       });
       const data = await res.json();
       if (data.success) {
-        onUnlock();
+        onUnlock(password);
       } else {
         setError('Incorrect password. Try again.');
       }
