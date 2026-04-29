@@ -1,5 +1,4 @@
-// ─── Password (sourced from .env: password = "U44Pl@0{BW2E") ───
-var EDIT_PASSWORD = '#KumarSanu99';
+var EDIT_PASSWORD = process.env.PASSWORD;
 var isEditMode = false;
 
 // ─── Phase metadata ───
@@ -130,16 +129,40 @@ function hideAuthModal() {
 
 function submitAuth() {
   var val = document.getElementById('auth-password').value;
-  if (val === EDIT_PASSWORD) {
-    isEditMode = true;
-    sessionStorage.setItem('roadmap_edit', '1');
-    hideAuthModal();
-    applyEditMode();
-  } else {
-    document.getElementById('auth-error').textContent = 'Incorrect password. Try again.';
-    document.getElementById('auth-password').value = '';
-    document.getElementById('auth-password').focus();
-  }
+  var errEl = document.getElementById('auth-error');
+  var btn = document.querySelector('#auth-modal .btn-primary');
+
+  if (!val) { errEl.textContent = 'Please enter a password.'; return; }
+
+  btn.textContent = 'Checking...';
+  btn.disabled = true;
+  errEl.textContent = '';
+
+  fetch('/api/auth', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: val })
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(data) {
+    if (data.success) {
+      isEditMode = true;
+      sessionStorage.setItem('roadmap_edit', '1');
+      hideAuthModal();
+      applyEditMode();
+    } else {
+      errEl.textContent = 'Incorrect password. Try again.';
+      document.getElementById('auth-password').value = '';
+      document.getElementById('auth-password').focus();
+    }
+  })
+  .catch(function() {
+    errEl.textContent = 'Could not reach auth server. Try again.';
+  })
+  .finally(function() {
+    btn.textContent = 'Unlock';
+    btn.disabled = false;
+  });
 }
 
 function lockEditMode() {
