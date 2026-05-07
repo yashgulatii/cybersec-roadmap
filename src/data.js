@@ -109,12 +109,12 @@ export const ROADMAP_DATA = {
     {
       title: "Security Blue Team — Junior Analyst Pathway",
       topics: [
-        { name: "SBT: Phishing Analysis", desc: "Header analysis, link inspection, attachment analysis.", link: "https://www.securityblue.team/", linkText: "securityblue.team", badge: "Do first", badgeClass: "badge-key" },
-        { name: "SBT: Threat Intelligence", desc: "IOC types, MISP, threat intel platforms.", badge: "Free", badgeClass: "badge-free" },
-        { name: "SBT: Digital Forensics", desc: "Artefact collection, timeline analysis.", badge: "Free", badgeClass: "badge-free" },
-        { name: "SBT: SIEM Fundamentals", desc: "Log ingestion, correlation rules, alert triage.", badge: "Free", badgeClass: "badge-free" },
-        { name: "SBT: Incident Response", desc: "Triage process, escalation criteria.", badge: "Free", badgeClass: "badge-free" },
-        { name: "SBT: Network Analysis", desc: "Pcap analysis, Wireshark filtering.", badge: "Free", badgeClass: "badge-free" }
+        { name: "SBT: Introduction to OSINT", desc: "Intelligence, securing yourself online, tools and services.", link: "https://www.securityblue.team/courses/blue-team-junior-analyst-pathway-bundle", linkText: "Junior Analyst Pathway", badge: "Do first", badgeClass: "badge-key" },
+        { name: "SBT: Introduction to Digital Forensics", desc: "Artefact collection, timeline analysis.", badge: "Free", badgeClass: "badge-free" },
+        { name: "SBT: Introduction to Dark Web Operations", desc: "Tor network, OPSEC, dark web monitoring.", badge: "Free", badgeClass: "badge-free" },
+        { name: "SBT: Introduction to Threat Hunting", desc: "Proactive detection, hunting methodologies.", badge: "Free", badgeClass: "badge-free" },
+        { name: "SBT: Introduction to Vulnerability Management", desc: "Scanning, CVSS scoring, patching lifecycle.", badge: "Free", badgeClass: "badge-free" },
+        { name: "SBT: Introduction to Network Analysis", desc: "Pcap analysis, Wireshark filtering.", badge: "Free", badgeClass: "badge-free" }
       ]
     },
     {
