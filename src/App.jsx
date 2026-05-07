@@ -79,14 +79,16 @@ export default function App() {
     PHASES.forEach(pId => {
       let pTotal = 0;
       let pDone = 0;
+      let sectionOffset = 0; // resets per phase — must match PhaseBlock's topicOffset
       ROADMAP_DATA[pId]?.forEach(section => {
         section.topics.forEach((topic, i) => {
-          const globalIdx = `${pId}-${total + i}`;
+          const globalIdx = `${pId}-${sectionOffset + i}`;
           pTotal++;
           if (completed.has(globalIdx)) pDone++;
         });
-        total += section.topics.length;
+        sectionOffset += section.topics.length;
       });
+      total += pTotal;
       done += pDone;
       phaseStats[pId] = { total: pTotal, done: pDone, pct: pTotal === 0 ? 0 : Math.round((pDone / pTotal) * 100) };
     });
