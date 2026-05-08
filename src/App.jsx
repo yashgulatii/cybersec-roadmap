@@ -87,24 +87,35 @@ export default function App() {
       if (phaseData && phaseData.sections) {
         phaseData.sections.forEach(section => {
           section.tasks.forEach(task => {
-            pTotal++;
-            
-            let isDone = false;
             if (task.subtasks && task.subtasks.length > 0) {
-              isDone = task.subtasks.every(st => completed.has(st.id));
-            } else {
-              isDone = completed.has(task.id);
-            }
-
-            if (isDone) pDone++;
-
-            if (task.skills && task.skills.length > 0) {
-              task.skills.forEach(skillId => {
-                if (skillStats[skillId]) {
-                  skillStats[skillId].total++;
-                  if (isDone) skillStats[skillId].done++;
-                }
+              pTotal += task.subtasks.length;
+              let sDone = 0;
+              task.subtasks.forEach(st => {
+                if (completed.has(st.id)) sDone++;
               });
+              pDone += sDone;
+
+              if (task.skills && task.skills.length > 0) {
+                task.skills.forEach(skillId => {
+                  if (skillStats[skillId]) {
+                    skillStats[skillId].total += task.subtasks.length;
+                    skillStats[skillId].done += sDone;
+                  }
+                });
+              }
+            } else {
+              pTotal++;
+              let isDone = completed.has(task.id);
+              if (isDone) pDone++;
+
+              if (task.skills && task.skills.length > 0) {
+                task.skills.forEach(skillId => {
+                  if (skillStats[skillId]) {
+                    skillStats[skillId].total++;
+                    if (isDone) skillStats[skillId].done++;
+                  }
+                });
+              }
             }
           });
         });
