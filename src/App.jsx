@@ -1,538 +1,631 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
-import { PHASES, PHASE_META, ROADMAP_DATA, SKILLS } from './data';
+import { useState, useEffect, useMemo } from 'react';
 import './index.css';
 
+// Daily missions definitions
+const DAILY_MISSIONS = [
+  { id: 'daily_ports', title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+  { id: 'daily_osi', title: 'OSI model: all 7 layers cold recall', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+  { id: 'daily_ad_theory', title: 'Study Active Directory concepts (Kerberos, LDAP, AD structure)', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
+  { id: 'daily_apply', title: 'Apply to 5 roles (Naukri/LinkedIn)', category: 'OPS', xp: 75, stat: 'OPS', bonus: 8 },
+  { id: 'daily_build', title: 'Work on AD Lab (2h deep session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
+  { id: 'daily_interview', title: 'Record yourself answering 1 interview Q', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 },
+  { id: 'daily_labs', title: '1 TryHackMe room or PortSwigger lab', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 }
+];
+
+// Project Board definitions
+const PROJECTS = [
+  {
+    name: 'THREAT INTEL CORRELATION ENGINE',
+    status: 'QUEUED',
+    focus: 'Design phase — architecture planning',
+    xp: 65,
+    active: false
+  },
+  {
+    name: 'CLOUD MISCONFIGURATION SCANNER (AWS/GCP)',
+    status: 'QUEUED',
+    focus: 'Research AWS IAM misconfig patterns',
+    xp: 65,
+    active: false
+  },
+  {
+    name: 'AD ATTACK & DETECTION LAB',
+    status: 'ACTIVE',
+    focus: 'Active Directory fundamentals — learning phase',
+    xp: 70,
+    active: true
+  }
+];
+
+// Side missions definitions
+const SIDE_MISSIONS = [
+  { id: 'side_morning', title: 'Morning ritual complete (no screen, Surya)', category: 'DISCIPLINE', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'side_exercise', title: 'Post-nap exercise done', category: 'PHYSICAL', xp: 30, stat: 'ENDURANCE', bonus: 4 },
+  { id: 'side_patrol', title: 'Evening patrol with friend (full hour)', category: 'SOCIAL', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'side_aar', title: 'After action report written', category: 'DISCIPLINE', xp: 20, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'side_read', title: 'Read 10 pages non-tech book', category: 'INTEL', xp: 20, stat: 'DISCIPLINE', bonus: 2 },
+  { id: 'side_ctf', title: 'CTF challenge (for fun)', category: 'GAMING', xp: 35, stat: 'SIGINT', bonus: 4 },
+  { id: 'side_reflect', title: 'Reflect on week in writing', category: 'GROWTH', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'side_reachout', title: "Reach out to someone you haven't spoken to", category: 'SOCIAL', xp: 20, stat: 'DISCIPLINE', bonus: 2 }
+];
+
+// Schedule blocks definitions (times map to minutes of day for highlighting)
+const SCHEDULE_BLOCKS = [
+  { time: '05:30', name: 'WAKE + RITUAL', category: 'recovery', desc: 'Bath · Surya · no screen', startMin: 330, endMin: 390 },
+  { time: '06:30', name: 'MORNING BRIEF', category: 'prep', desc: 'Review missions · 15 min', startMin: 390, endMin: 405 },
+  { time: '06:45', name: 'DEEP OPS', category: 'primary', desc: 'Roadmap theory · TryHackMe · 2h45m', startMin: 405, endMin: 570 },
+  { time: '09:30', name: 'FIELD BREAK', category: 'rest', desc: 'Tea · stretch · away from screen', startMin: 570, endMin: 600 },
+  { time: '10:00', name: 'PROJECT BUILD', category: 'primary', desc: 'AD Lab · Threat Intel Engine · Cloud Scanner · 2h30m', startMin: 600, endMin: 750 },
+  { time: '12:30', name: 'CHOW', category: 'recovery', desc: 'Lunch', startMin: 750, endMin: 780 },
+  { time: '13:00', name: 'REST PHASE', category: 'recovery', desc: 'Power nap · 30 min', startMin: 780, endMin: 810 },
+  { time: '13:30', name: 'PHYSICAL TRAINING', category: 'sideop', desc: 'Exercise · 40 min', startMin: 810, endMin: 855 },
+  { time: '14:15', name: 'APPLICATION OPS', category: 'primary', desc: 'Job apps · cold emails · 1h45m', startMin: 855, endMin: 960 },
+  { time: '16:00', name: 'SECONDARY OPS', category: 'secondary', desc: 'PortSwigger · Splunk · bug bounty · 2h', startMin: 960, endMin: 1080 },
+  { time: '18:00', name: 'PATROL', category: 'sideop', desc: 'Walk with friend · 1–2 hours', startMin: 1080, endMin: 1200 },
+  { time: '20:00', name: 'INTEL REVIEW', category: 'light', desc: 'Read · tech content · 1 hour', startMin: 1200, endMin: 1260 },
+  { time: '21:00', name: 'AFTER ACTION', category: 'prep', desc: 'Journal · plan tomorrow · 30 min', startMin: 1260, endMin: 1290 },
+  { time: '21:30', name: 'COMMS BLACKOUT', category: 'recovery', desc: 'No screens until sleep', startMin: 1290, endMin: 1350 },
+  { time: '22:30', name: 'STAND DOWN', category: 'recovery', desc: 'Sleep', startMin: 1350, endMin: 1770 } // overnight
+];
+
+// Helpers for Date calculations
+const getTodayString = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
+const getYesterdayString = () => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+
 export default function App() {
-  const [completed, setCompleted] = useState(new Set());
-  const [isEditMode, setIsEditMode] = useState(false);
-  const [showDashboard, setShowDashboard] = useState(false);
-  const [showAuthModal, setShowAuthModal] = useState(false);
-
-  useEffect(() => {
-    const saved = localStorage.getItem('roadmap_progress');
+  const [activeTab, setActiveTab] = useState('missions');
+  
+  // Profile state
+  const [profile, setProfile] = useState(() => {
+    const saved = localStorage.getItem('operator_profile');
     if (saved) {
-      setCompleted(new Set(JSON.parse(saved)));
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
     }
-    
-    // Fetch latest progress from the server
-    fetch('/api/progress')
-      .then(res => res.json())
-      .then(data => {
-        if (data.progress) {
-          setCompleted(new Set(data.progress));
-          localStorage.setItem('roadmap_progress', JSON.stringify(data.progress));
-        }
-      })
-      .catch(e => console.error("Could not fetch remote progress", e));
+    return { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
+  });
 
-    const editKey = sessionStorage.getItem('roadmap_edit_key');
-    if (editKey) {
-      setIsEditMode(true);
+  // Completed missions for today
+  const [completedMissions, setCompletedMissions] = useState(() => {
+    const today = getTodayString();
+    const saved = localStorage.getItem(`operator_completed_${today}`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error(e);
+      }
     }
+    return {};
+  });
+
+  // Schedule timer index
+  const [activeBlockIndex, setActiveBlockIndex] = useState(-1);
+
+  // Particle effect state
+  const [particles, setParticles] = useState([]);
+
+  // Setup schedule highlighter
+  useEffect(() => {
+    const updateActiveBlock = () => {
+      const now = new Date();
+      const currentMins = now.getHours() * 60 + now.getMinutes();
+      
+      // Determine if early morning before 05:30 (treat as sleep block from previous day)
+      let calculatedMins = currentMins;
+      if (currentMins < 330) {
+        calculatedMins = currentMins + 1440; // overnight minutes
+      }
+
+      let activeIndex = -1;
+      for (let i = 0; i < SCHEDULE_BLOCKS.length; i++) {
+        const block = SCHEDULE_BLOCKS[i];
+        if (calculatedMins >= block.startMin && calculatedMins < block.endMin) {
+          activeIndex = i;
+          break;
+        }
+      }
+      setActiveBlockIndex(activeIndex);
+    };
+
+    updateActiveBlock();
+    const interval = setInterval(updateActiveBlock, 10000); // update every 10s
+    return () => clearInterval(interval);
   }, []);
 
-  const saveCompleted = (newSet) => {
-    setCompleted(newSet);
-    const progressArr = Array.from(newSet);
-    localStorage.setItem('roadmap_progress', JSON.stringify(progressArr));
+  // Sync profile and handle streak maintain/reset on load
+  useEffect(() => {
+    const today = getTodayString();
+    const yesterday = getYesterdayString();
+    
+    setProfile(prev => {
+      let updatedProfile = { ...prev };
+      const lastActive = prev.lastActiveDate;
 
-    const editKey = sessionStorage.getItem('roadmap_edit_key');
-    if (editKey) {
-      fetch('/api/progress', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: editKey, progress: progressArr })
-      }).catch(e => console.error("Could not sync progress", e));
-    }
-  };
-
-  const toggleTopic = (globalIndex) => {
-    if (!isEditMode) {
-      setShowAuthModal(true);
-      return;
-    }
-    const newSet = new Set(completed);
-    if (newSet.has(globalIndex)) {
-      newSet.delete(globalIndex);
-    } else {
-      newSet.add(globalIndex);
-    }
-    saveCompleted(newSet);
-  };
-
-  const unlockEdit = (pw) => {
-    setIsEditMode(true);
-    sessionStorage.setItem('roadmap_edit_key', pw);
-    setShowAuthModal(false);
-  };
-
-  const lockEdit = () => {
-    setIsEditMode(false);
-    sessionStorage.removeItem('roadmap_edit_key');
-  };
-
-  const stats = useMemo(() => {
-    let total = 0;
-    let done = 0;
-    const phaseStats = {};
-    const skillStats = {};
-    Object.keys(SKILLS).forEach(k => {
-      skillStats[k] = { ...SKILLS[k], total: 0, done: 0 };
-    });
-
-    PHASES.forEach(pId => {
-      let pTotal = 0;
-      let pDone = 0;
-      const phaseData = ROADMAP_DATA[pId];
-      if (phaseData && phaseData.sections) {
-        phaseData.sections.forEach(section => {
-          section.tasks.forEach(task => {
-            if (task.subtasks && task.subtasks.length > 0) {
-              pTotal += task.subtasks.length;
-              let sDone = 0;
-              task.subtasks.forEach(st => {
-                if (completed.has(st.id)) sDone++;
-              });
-              pDone += sDone;
-
-              if (task.skills && task.skills.length > 0) {
-                task.skills.forEach(skillId => {
-                  if (skillStats[skillId]) {
-                    skillStats[skillId].total += task.subtasks.length;
-                    skillStats[skillId].done += sDone;
-                  }
-                });
-              }
-            } else {
-              pTotal++;
-              let isDone = completed.has(task.id);
-              if (isDone) pDone++;
-
-              if (task.skills && task.skills.length > 0) {
-                task.skills.forEach(skillId => {
-                  if (skillStats[skillId]) {
-                    skillStats[skillId].total++;
-                    if (isDone) skillStats[skillId].done++;
-                  }
-                });
-              }
-            }
-          });
-        });
+      if (lastActive) {
+        if (lastActive === today || lastActive === yesterday) {
+          // Maintain current streak
+        } else {
+          // More than 1 day gap, reset streak
+          updatedProfile.streak = 0;
+        }
+      } else {
+        updatedProfile.streak = 0;
       }
-      total += pTotal;
-      done += pDone;
-      phaseStats[pId] = { total: pTotal, done: pDone, pct: pTotal === 0 ? 0 : Math.round((pDone / pTotal) * 100) };
+
+      localStorage.setItem('operator_profile', JSON.stringify(updatedProfile));
+      return updatedProfile;
+    });
+  }, []);
+
+  // Compute RPG stats dynamically
+  const computedStats = useMemo(() => {
+    let sigintBonus = 0;
+    let opsBonus = 0;
+    let arsenalBonus = 0;
+    let commsBonus = 0;
+    let disciplineBonus = 0;
+    let enduranceBonus = 0;
+
+    DAILY_MISSIONS.forEach(m => {
+      if (completedMissions[m.id]) {
+        if (m.stat === 'SIGINT') sigintBonus += m.bonus;
+        if (m.stat === 'OPS') opsBonus += m.bonus;
+        if (m.stat === 'ARSENAL') arsenalBonus += m.bonus;
+        if (m.stat === 'COMMS') commsBonus += m.bonus;
+      }
     });
 
-    Object.keys(skillStats).forEach(k => {
-      const s = skillStats[k];
-      s.pct = s.total === 0 ? 0 : Math.round((s.done / s.total) * 100);
+    SIDE_MISSIONS.forEach(m => {
+      if (completedMissions[m.id]) {
+        if (m.stat === 'SIGINT') sigintBonus += m.bonus;
+        if (m.stat === 'DISCIPLINE') disciplineBonus += m.bonus;
+        if (m.stat === 'ENDURANCE') enduranceBonus += m.bonus;
+      }
     });
 
-    const overallPct = total === 0 ? 0 : Math.round((done / total) * 100);
+    return {
+      sigint: Math.min(100, 62 + sigintBonus),
+      ops: Math.min(100, 45 + opsBonus),
+      arsenal: Math.min(100, 70 + arsenalBonus),
+      comms: Math.min(100, 40 + commsBonus),
+      discipline: Math.min(100, 55 + disciplineBonus),
+      endurance: Math.min(100, 60 + enduranceBonus),
+      sigintBonus,
+      opsBonus,
+      arsenalBonus,
+      commsBonus,
+      disciplineBonus,
+      enduranceBonus
+    };
+  }, [completedMissions]);
 
-    return { total, done, phaseStats, skillStats, overallPct };
-  }, [completed]);
+  // Compute level from XP
+  const levelProgress = useMemo(() => {
+    const totalXp = profile.totalXp;
+    const currentLevel = Math.floor(totalXp / 200) + 1;
+    const currentLevelXp = totalXp % 200;
+    return {
+      level: currentLevel,
+      xpInLevel: currentLevelXp,
+      pct: (currentLevelXp / 200) * 100
+    };
+  }, [profile.totalXp]);
+
+  // Toggle mission completion
+  const handleToggleMission = (missionId, xpReward, e) => {
+    const today = getTodayString();
+    const yesterday = getYesterdayString();
+    
+    // Add particle logic
+    if (!completedMissions[missionId]) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top;
+      
+      const newParticle = {
+        id: Date.now() + Math.random(),
+        xp: xpReward,
+        x: x,
+        y: y
+      };
+      setParticles(prev => [...prev, newParticle]);
+      setTimeout(() => {
+        setParticles(prev => prev.filter(p => p.id !== newParticle.id));
+      }, 1000);
+    }
+
+    const updatedMissions = {
+      ...completedMissions,
+      [missionId]: !completedMissions[missionId]
+    };
+
+    // Filter out uncompleted fields to save space
+    if (!updatedMissions[missionId]) {
+      delete updatedMissions[missionId];
+    }
+
+    setCompletedMissions(updatedMissions);
+    localStorage.setItem(`operator_completed_${today}`, JSON.stringify(updatedMissions));
+
+    // Update profile total XP and streak
+    setProfile(prev => {
+      const activeStateAfter = Object.keys(updatedMissions).length;
+      let newTotalXp = prev.totalXp + (updatedMissions[missionId] ? xpReward : -xpReward);
+      if (newTotalXp < 0) newTotalXp = 0;
+
+      let newStreak = prev.streak;
+      let newLastActive = prev.lastActiveDate;
+
+      if (activeStateAfter > 0 && (!prev.lastActiveDate || prev.lastActiveDate !== today)) {
+        // Just completed first mission today
+        if (prev.lastActiveDate === yesterday) {
+          newStreak = prev.streak + 1;
+        } else {
+          newStreak = 1;
+        }
+        newLastActive = today;
+      } else if (activeStateAfter === 0 && prev.lastActiveDate === today) {
+        // Unchecked the last completed mission today
+        // Revert last active to yesterday (or empty if they had no history)
+        newLastActive = prev.streak > 1 ? yesterday : '';
+        newStreak = Math.max(0, prev.streak - 1);
+      }
+
+      const updatedLevel = Math.floor(newTotalXp / 200) + 1;
+
+      const newProfile = {
+        level: updatedLevel,
+        totalXp: newTotalXp,
+        streak: newStreak,
+        lastActiveDate: newLastActive
+      };
+
+      localStorage.setItem('operator_profile', JSON.stringify(newProfile));
+      return newProfile;
+    });
+  };
 
   return (
-    <div className={isEditMode ? '' : 'view-mode'}>
-      <div className="topbar">
-        <div className="topbar-title"><span>Yash's</span> Cybersecurity Roadmap</div>
-        <div className="overall-pill">Overall: <span className="pct">{stats.overallPct}%</span></div>
-        <button className="topbar-btn" onClick={() => setShowDashboard(true)}>📊 <span>Dashboard</span></button>
-        {isEditMode ? (
-          <button className="topbar-btn unlocked" onClick={lockEdit}>🔓 <span>Lock</span></button>
-        ) : (
-          <button className="topbar-btn" onClick={() => setShowAuthModal(true)}>🔒 <span>Edit</span></button>
-        )}
+    <div className="app-container">
+      {/* XP Floating Particle Container */}
+      <div className="xp-particle-layer">
+        {particles.map(p => (
+          <div key={p.id} className="xp-particle" style={{ left: p.x, top: p.y }}>
+            +{p.xp} XP
+          </div>
+        ))}
       </div>
 
-      <div className="layout">
-        <Sidebar stats={stats} />
-        <main className="main">
-          {!isEditMode && (
-            <div className="view-banner">
-              <span>🔒 <strong>View-only mode</strong> — click <strong>Edit</strong> in the top bar to make changes.</span>
-              <button onClick={() => setShowAuthModal(true)}>Unlock Edit</button>
-            </div>
-          )}
-
-          {PHASES.map(pId => (
-            <PhaseBlock 
-              key={pId} 
-              pId={pId} 
-              meta={PHASE_META.find(m => m.id === pId)} 
-              data={ROADMAP_DATA[pId]} 
-              stats={stats.phaseStats[pId]}
-              completed={completed}
-              toggleTopic={toggleTopic}
-            />
-          ))}
-        </main>
-      </div>
-
-      {showDashboard && <Dashboard stats={stats} onClose={() => setShowDashboard(false)} />}
-      {showAuthModal && <AuthModal onClose={() => setShowAuthModal(false)} onUnlock={unlockEdit} />}
-    </div>
-  );
-}
-
-function Sidebar({ stats }) {
-  const sections = [
-    { label: 'Fire Track', phases: ['w1', 'w2', 'w3', 'w4', 'w5', 'w6', 'w7', 'w8'] },
-    { label: 'Post-Job Learning', phases: ['pa', 'pb', 'pc', 'pd', 'pe', 'pf'] }
-  ];
-
-  return (
-    <nav className="sidebar">
-      {sections.map(sec => (
-        <div key={sec.label}>
-          <div className="sidebar-section">{sec.label}</div>
-          {sec.phases.map(pId => {
-            const meta = PHASE_META.find(m => m.id === pId);
-            return (
-              <a key={pId} className="sidebar-item" href={`#${pId}`}>
-                <div className="sidebar-item-inner">
-                  <div className="sidebar-item-top">
-                    <span className="sidebar-dot" style={{ background: meta.color }}></span>
-                    <span className="sidebar-label">{meta.label}</span>
-                    <span className="sidebar-pct">{stats.phaseStats[pId].pct}%</span>
-                  </div>
-                  <div className="sidebar-bar">
-                    <div className="sidebar-bar-fill" style={{ width: `${stats.phaseStats[pId].pct}%`, background: meta.color }}></div>
-                  </div>
-                </div>
-              </a>
-            );
-          })}
-        </div>
-      ))}
-    </nav>
-  );
-}
-
-function PhaseBlock({ pId, meta, data, stats, completed, toggleTopic }) {
-  if (!data) return null;
-
-  return (
-    <div className="phase-block" id={pId}>
-      <div className="phase-header">
-        <div className="phase-icon" style={{ background: `${meta.color}22` }}>{meta.icon}</div>
-        <div>
-          <div className="phase-title">{data.weekTitle || meta.label}</div>
-          <div className="phase-sub">{data.weekGoal || meta.sub}</div>
-        </div>
-        <div className="phase-progress-wrap">
-          <div className="phase-pct-label" style={{ color: meta.color }}>{stats.pct}%</div>
-          <div className="phase-bar">
-            <div className="phase-bar-fill" style={{ width: `${stats.pct}%`, background: meta.color }}></div>
+      {/* GLOBAL HEADER */}
+      <header className="global-header">
+        <div className="header-top-row">
+          <div className="operator-tag">
+            <span className="pulse-dot"></span>
+            OPERATOR: YASH
+          </div>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <span className="streak-counter">
+              🔥 STREAK: {profile.streak} {profile.streak === 1 ? 'DAY' : 'DAYS'}
+            </span>
+            <span className="level-badge">
+              LVL {levelProgress.level}
+            </span>
           </div>
         </div>
-      </div>
+        <div className="xp-progress-container">
+          <div className="xp-bar-outer">
+            <div className="xp-bar-inner" style={{ width: `${levelProgress.pct}%` }}></div>
+          </div>
+          <div className="xp-numbers">
+            {levelProgress.xpInLevel} / 200 XP
+          </div>
+        </div>
+      </header>
 
-      {data.sections && data.sections.map((section, sIdx) => (
-        <div className="section" key={sIdx}>
-          <div className="section-title">{section.sectionTitle}</div>
-          <div className="task-list">
-            {section.tasks.map((task) => {
-              const allSubtasksDone = task.subtasks && task.subtasks.length > 0 
-                ? task.subtasks.every(st => completed.has(st.id))
-                : completed.has(task.id);
+      {/* NAVIGATION TABS */}
+      <nav className="nav-tabs">
+        <button 
+          className={`tab-btn ${activeTab === 'missions' ? 'active' : ''}`}
+          onClick={() => setActiveTab('missions')}
+        >
+          Missions
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'schedule' ? 'active' : ''}`}
+          onClick={() => setActiveTab('schedule')}
+        >
+          Schedule
+        </button>
+        <button 
+          className={`tab-btn ${activeTab === 'character' ? 'active' : ''}`}
+          onClick={() => setActiveTab('character')}
+        >
+          Character
+        </button>
+      </nav>
 
-              return (
-                <div key={task.id} className="task-group" style={{ marginBottom: '24px' }}>
-                  <div className="task-group-header" style={{ marginBottom: '10px', display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <div style={{ fontWeight: '600', color: 'var(--text)', fontSize: '15px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      {allSubtasksDone && <span style={{ color: 'var(--green)' }}>✓</span>}
-                      {task.title}
-                    </div>
-                    <div style={{ display: 'flex', gap: '6px', marginLeft: 'auto' }}>
-                      {task.badge && <span className={`topic-badge ${task.badgeClass || ''}`}>{task.badge}</span>}
-                      {task.skills && task.skills.map(s => {
-                         const sk = SKILLS[s];
-                         return sk ? <span key={s} className="topic-badge" style={{ background: `${sk.color}22`, color: sk.color }}>{sk.icon} {sk.name}</span> : null;
-                      })}
-                    </div>
+      {/* TAB CONTENT PANEL */}
+      <main className="tab-content-panel">
+        {activeTab === 'missions' && (
+          <div className="missions-layout">
+            
+            {/* MAIN OBJECTIVE */}
+            <section className="main-objective-section">
+              <h2 className="panel-title">Main Objective</h2>
+              <hr className="section-divider" />
+              <div className="main-objective-card">
+                <div className="obj-header">
+                  <div className="obj-title-group">
+                    <h3>Land First Cybersecurity Role</h3>
                   </div>
-                  
-                  {task.link && (
-                    <div style={{ marginBottom: '10px' }}>
-                      <a className="topic-link" href={task.link} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()}>{task.linkText || task.link}</a>
-                    </div>
-                  )}
+                  <span className="status-badge">ACTIVE</span>
+                </div>
 
-                  <div className="topic-grid">
-                    {task.subtasks && task.subtasks.length > 0 ? (
-                      task.subtasks.map(st => {
-                        const isDone = completed.has(st.id);
-                        return (
-                          <div key={st.id} className={`topic-item ${isDone ? 'done' : ''}`} onClick={() => toggleTopic(st.id)}>
-                            <div className="topic-check">
-                              <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                                <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                              </svg>
-                            </div>
-                            <div className="topic-content">
-                              <div className="topic-name">{st.text}</div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <div className={`topic-item ${completed.has(task.id) ? 'done' : ''}`} onClick={() => toggleTopic(task.id)}>
-                        <div className="topic-check">
-                          <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                            <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </div>
-                        <div className="topic-content">
-                          <div className="topic-name">{task.title}</div>
+                <div className="obj-progress-group">
+                  <div className="obj-progress-header">
+                    <span>STAGE PROGRESS</span>
+                    <span>35%</span>
+                  </div>
+                  <div className="obj-progress-bar-outer">
+                    <div className="obj-progress-bar-inner" style={{ width: '35%' }}></div>
+                  </div>
+                </div>
+
+                <div className="milestones-grid">
+                  <div className="milestone-item">
+                    <span className="milestone-week">WEEK 1–4</span>
+                    <span className="milestone-title">Foundation Complete</span>
+                  </div>
+                  <div className="milestone-item">
+                    <span className="milestone-week">WEEK 5–6</span>
+                    <span className="milestone-title">SIEM Mastery</span>
+                  </div>
+                  <div className="milestone-item">
+                    <span className="milestone-week">WEEK 7</span>
+                    <span className="milestone-title">Homelab Live</span>
+                  </div>
+                  <div className="milestone-item">
+                    <span className="milestone-week">WEEK 8</span>
+                    <span className="milestone-title">35+ Applications Sent</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {/* PROJECT BOARD */}
+            <section className="project-board-section">
+              <h2 className="panel-title">Project Board</h2>
+              <hr className="section-divider" />
+              <div className="projects-grid">
+                {PROJECTS.map((proj, idx) => (
+                  <div 
+                    key={idx} 
+                    className={`project-card ${proj.active ? 'active-project' : 'queued'}`}
+                  >
+                    <div className="project-status-row">
+                      <span className="project-name">{proj.name}</span>
+                      <span className={proj.active ? 'project-badge-active' : 'project-badge-queued'}>
+                        {proj.status}
+                      </span>
+                    </div>
+                    <span className="project-focus">Focus: {proj.focus}</span>
+                    <span className="project-xp-reward">Daily session XP: +{proj.xp}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* DAILY OPS */}
+            <section className="daily-ops-section">
+              <h2 className="panel-title">Daily Ops</h2>
+              <hr className="section-divider" />
+              <div className="missions-grid">
+                {DAILY_MISSIONS.map(m => {
+                  const isCompleted = !!completedMissions[m.id];
+                  return (
+                    <div 
+                      key={m.id} 
+                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                      onClick={(e) => handleToggleMission(m.id, m.xp, e)}
+                    >
+                      <div className="checkbox-container">
+                        <span className="checkmark-icon"></span>
+                      </div>
+                      <div className="mission-details">
+                        <span className="mission-title">{m.title}</span>
+                        <div className="mission-meta">
+                          <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
+                          <span className="xp-reward">+{m.xp} XP</span>
                         </div>
                       </div>
-                    )}
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            {/* SIDE OPS */}
+            <section className="side-ops-section">
+              <h2 className="panel-title">Side Ops</h2>
+              <hr className="section-divider" />
+              <div className="missions-grid">
+                {SIDE_MISSIONS.map(m => {
+                  const isCompleted = !!completedMissions[m.id];
+                  return (
+                    <div 
+                      key={m.id} 
+                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                      onClick={(e) => handleToggleMission(m.id, m.xp, e)}
+                    >
+                      <div className="checkbox-container">
+                        <span className="checkmark-icon"></span>
+                      </div>
+                      <div className="mission-details">
+                        <span className="mission-title">{m.title}</span>
+                        <div className="mission-meta">
+                          <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
+                          <span className="xp-reward">+{m.xp} XP</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          </div>
+        )}
+
+        {activeTab === 'schedule' && (
+          <div className="schedule-container">
+            {SCHEDULE_BLOCKS.map((block, idx) => {
+              const isActive = activeBlockIndex === idx;
+              return (
+                <div 
+                  key={idx} 
+                  className={`timeline-block border-${block.category} ${isActive ? 'active-block' : ''}`}
+                >
+                  <div className="timeline-time">{block.time}</div>
+                  <div className="timeline-details">
+                    <div className="timeline-header-group">
+                      <span className="timeline-name">{block.name}</span>
+                      <span className="timeline-desc">{block.desc}</span>
+                    </div>
+                    <span className="timeline-type-tag">{block.category}</span>
                   </div>
                 </div>
               );
             })}
           </div>
-        </div>
-      ))}
-    </div>
-  );
-}
+        )}
 
-function AuthModal({ onClose, onUnlock }) {
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async () => {
-    if (!password) { setError('Please enter a password.'); return; }
-    setLoading(true);
-    setError('');
-
-    try {
-      const res = await fetch('/api/auth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password })
-      });
-      const data = await res.json();
-      if (data.success) {
-        onUnlock(password);
-      } else {
-        setError('Incorrect password. Try again.');
-      }
-    } catch (e) {
-      setError('Could not reach auth server. Try again.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="modal-overlay visible">
-      <div className="modal-box">
-        <div className="modal-icon">🔐</div>
-        <div className="modal-title">Edit Mode</div>
-        <div className="modal-sub">Enter the master password to edit progress.</div>
-        <input 
-          type="password" 
-          className="modal-input" 
-          placeholder="Password..." 
-          value={password}
-          onChange={e => setPassword(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
-          autoFocus
-        />
-        <div className="modal-error">{error}</div>
-        <div className="modal-actions">
-          <button className="btn-ghost" onClick={onClose} disabled={loading}>Cancel</button>
-          <button className="btn-primary" onClick={handleSubmit} disabled={loading}>{loading ? 'Checking...' : 'Unlock'}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Dashboard({ stats, onClose }) {
-  useEffect(() => {
-    const drawCharts = () => {
-      // Draw Donuts based on skillStats
-      Object.keys(stats.skillStats).filter(k => stats.skillStats[k].total > 0).forEach(k => {
-        const canvasId = `dash-donut-${k}`;
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        const W = canvas.width; const H = canvas.height;
-        ctx.clearRect(0, 0, W, H);
-        
-        const cx = W / 2; const cy = H / 2;
-        const r = 24; const lw = 6;
-        const sStats = stats.skillStats[k];
-        
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-        ctx.lineWidth = lw;
-        ctx.stroke();
-
-        if (sStats.total > 0 && sStats.done > 0) {
-          const endAngle = (sStats.done / sStats.total) * 2 * Math.PI - (Math.PI / 2);
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, -Math.PI / 2, endAngle);
-          
-          ctx.strokeStyle = sStats.color;
-          ctx.lineCap = 'round';
-          ctx.stroke();
-        }
-
-        ctx.fillStyle = '#fff';
-        ctx.font = 'bold 12px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(sStats.pct + '%', cx, cy + 1);
-      });
-
-      // Draw Bar Chart for Skills
-      const bCanvas = document.getElementById('dash-skill-barchart');
-      if (bCanvas) {
-        const bCtx = bCanvas.getContext('2d');
-        const dpr = window.devicePixelRatio || 1;
-        const rect = bCanvas.getBoundingClientRect();
-        bCanvas.width = rect.width * dpr;
-        bCanvas.height = rect.height * dpr;
-        bCtx.scale(dpr, dpr);
-        
-        const W = rect.width; const H = rect.height;
-        bCtx.clearRect(0, 0, W, H);
-        
-        const padding = 40;
-        const chartW = W - padding * 2;
-        const chartH = H - padding * 2;
-        
-        bCtx.beginPath();
-        bCtx.moveTo(padding, padding);
-        bCtx.lineTo(padding, padding + chartH);
-        bCtx.lineTo(padding + chartW, padding + chartH);
-        bCtx.strokeStyle = 'rgba(255,255,255,0.1)';
-        bCtx.lineWidth = 1;
-        bCtx.stroke();
-
-        const skillKeys = Object.keys(stats.skillStats).filter(k => stats.skillStats[k].total > 0);
-        const numBars = skillKeys.length;
-        if (numBars > 0) {
-          const barSpacing = chartW / numBars;
-          const barWidth = Math.min(40, barSpacing * 0.6);
-
-          skillKeys.forEach((k, i) => {
-            const sStats = stats.skillStats[k];
-            
-            const x = padding + i * barSpacing + (barSpacing - barWidth) / 2;
-            const h = (sStats.pct / 100) * chartH;
-            const y = padding + chartH - h;
-
-            bCtx.fillStyle = sStats.color;
-            bCtx.fillRect(x, y, barWidth, h);
-
-            bCtx.fillStyle = 'rgba(255,255,255,0.05)';
-            bCtx.fillRect(x, padding, barWidth, chartH - h);
-
-            bCtx.fillStyle = '#888';
-            bCtx.font = '14px sans-serif';
-            bCtx.textAlign = 'center';
-            bCtx.fillText(sStats.icon, x + barWidth / 2, padding + chartH + 16);
-          });
-        }
-      }
-    };
-    
-    requestAnimationFrame(drawCharts);
-    window.addEventListener('resize', drawCharts);
-    return () => window.removeEventListener('resize', drawCharts);
-  }, [stats]);
-
-  return (
-    <div className="dash-overlay visible">
-      <div className="dash-topbar">
-        <div className="dash-topbar-title">Skills Dashboard</div>
-        <button className="btn-ghost" onClick={onClose}>✕ Close</button>
-      </div>
-
-      <div className="dash-body">
-        <div className="dash-section-title">Overview</div>
-        <div className="dash-stats-grid">
-          <div className="stat-card">
-            <div className="stat-card-label">Total Tasks</div>
-            <div className="stat-card-value blue">{stats.total}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-label">Completed</div>
-            <div className="stat-card-value green">{stats.done}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-label">Remaining</div>
-            <div className="stat-card-value amber">{stats.total - stats.done}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-label">Overall %</div>
-            <div className="stat-card-value">{stats.overallPct}%</div>
-          </div>
-        </div>
-
-        <div className="overall-progress-card">
-          <div className="overall-progress-header">
-            <div className="overall-progress-label">Overall Completion</div>
-            <div className="overall-progress-pct">{stats.overallPct}%</div>
-          </div>
-          <div className="overall-bar-track">
-            <div className="overall-bar-fill" style={{ width: `${stats.overallPct}%` }}></div>
-          </div>
-        </div>
-
-        <div className="dash-section-title">Skills Breakdown</div>
-        <div className="dash-donuts-grid">
-          {Object.keys(stats.skillStats).filter(k => stats.skillStats[k].total > 0).map(k => {
-            const s = stats.skillStats[k];
-            return (
-              <div className="donut-card" key={k}>
-                <canvas id={`dash-donut-${k}`} width="64" height="64"></canvas>
-                <div className="donut-label" style={{ color: s.color }}>{s.icon} {s.name}</div>
-                <div className="donut-sub">{s.done} / {s.total} tasks</div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="dash-section-title">Skills Comparison</div>
-        <div className="dash-card" style={{ marginBottom: '28px' }}>
-          <div className="dash-card-title">Completion by Skill</div>
-          <canvas id="dash-skill-barchart" style={{ width: '100%', height: '200px', display: 'block' }}></canvas>
-        </div>
-
-        <div className="dash-section-title">Phase Progress</div>
-        <div className="dash-phase-bars">
-          {PHASES.map(pId => {
-            const meta = PHASE_META.find(m => m.id === pId);
-            const pStats = stats.phaseStats[pId];
-            return (
-              <div className="dash-phase-bar-item" key={pId}>
-                <div className="dash-phase-bar-header">
-                  <div className="dash-phase-bar-label">
-                    <span className="dash-phase-icon" style={{ background: `${meta.color}22` }}>{meta.icon}</span>
-                    <span>{meta.label}</span>
+        {activeTab === 'character' && (
+          <div className="character-layout">
+            <section className="character-sheet-section">
+              <h2 className="panel-title">Character Sheet</h2>
+              <hr className="section-divider" />
+              
+              <div className="stats-card">
+                <div className="stats-grid">
+                  
+                  {/* SIGINT */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">📡</span>
+                        <span className="stat-name">SIGINT</span>
+                        <span className="stat-desc">— Technical knowledge</span>
+                      </div>
+                      <span className="stat-value">{computedStats.sigint}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.sigint}%` }}></div>
+                    </div>
                   </div>
-                  <div className="dash-phase-bar-pct" style={{ color: meta.color }}>{pStats.pct}%</div>
-                </div>
-                <div className="dash-phase-bar-track">
-                  <div className="dash-phase-bar-fill" style={{ width: `${pStats.pct}%`, background: meta.color }}></div>
+
+                  {/* OPS */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">⚡</span>
+                        <span className="stat-name">OPS</span>
+                        <span className="stat-desc">— Execution speed</span>
+                      </div>
+                      <span className="stat-value">{computedStats.ops}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.ops}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* ARSENAL */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">⚔️</span>
+                        <span className="stat-name">ARSENAL</span>
+                        <span className="stat-desc">— 3 active projects · AD Lab · TI Engine · Cloud Scanner</span>
+                      </div>
+                      <span className="stat-value">{computedStats.arsenal}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.arsenal}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* COMMS */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">💬</span>
+                        <span className="stat-name">COMMS</span>
+                        <span className="stat-desc">— Interview readiness</span>
+                      </div>
+                      <span className="stat-value">{computedStats.comms}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.comms}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* DISCIPLINE */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">🛡️</span>
+                        <span className="stat-name">DISCIPLINE</span>
+                        <span className="stat-desc">— Schedule adherence</span>
+                      </div>
+                      <span className="stat-value">{computedStats.discipline}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.discipline}%` }}></div>
+                    </div>
+                  </div>
+
+                  {/* ENDURANCE */}
+                  <div className="stat-item">
+                    <div className="stat-header">
+                      <div className="stat-label-group">
+                        <span className="stat-icon">🔋</span>
+                        <span className="stat-name">ENDURANCE</span>
+                        <span className="stat-desc">— Physical/mental</span>
+                      </div>
+                      <span className="stat-value">{computedStats.endurance}%</span>
+                    </div>
+                    <div className="stat-bar-outer">
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.endurance}%` }}></div>
+                    </div>
+                  </div>
+
                 </div>
               </div>
-            );
-          })}
-        </div>
-      </div>
+
+              {/* OPERATOR STAT SUMMARY */}
+              <div className="profile-card">
+                <div className="profile-details">
+                  <span className="profile-name">NAME: YASH</span>
+                  <span className="profile-xp">LIFETIME XP: {profile.totalXp} | CURRENT LEVEL: {profile.level}</span>
+                </div>
+                <div className="profile-streak-badge">
+                  <span>🔥 {profile.streak} DAY STREAK</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+      </main>
     </div>
   );
 }
