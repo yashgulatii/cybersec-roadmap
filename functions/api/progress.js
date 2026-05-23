@@ -1,7 +1,7 @@
 export async function onRequestGet(context) {
   try {
     const data = await context.env.ROADMAP_KV.get('progress');
-    const progress = data ? JSON.parse(data) : [];
+    const progress = data ? JSON.parse(data) : null;
     
     return new Response(JSON.stringify({ progress }), {
       status: 200,
@@ -31,7 +31,7 @@ export async function onRequestPost(context) {
       });
     }
 
-    if (!Array.isArray(body.progress)) {
+    if (typeof body.progress !== 'object' || body.progress === null) {
       return new Response(JSON.stringify({ error: 'Invalid data format' }), { 
         status: 400,
         headers: { 'Access-Control-Allow-Origin': '*' }

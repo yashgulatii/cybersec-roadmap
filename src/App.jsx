@@ -83,6 +83,14 @@ const getYesterdayString = () => {
 export default function App() {
   const [activeTab, setActiveTab] = useState('missions');
   
+  // Auth states
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passcode, setPasscode] = useState('');
+  const [authError, setAuthError] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [syncLoading, setSyncLoading] = useState(false);
+
   // Profile state
   const [profile, setProfile] = useState(() => {
     const saved = localStorage.getItem('operator_profile');
@@ -116,16 +124,130 @@ export default function App() {
   // Particle effect state
   const [particles, setParticles] = useState([]);
 
+  // Helpers to push state to server KV
+  const saveProgressToServer = (password, missions, prof) => {
+    setSyncLoading(true);
+    fetch('/api/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        password: password,
+        progress: {
+          completedMissions: missions,
+          profile: prof
+        }
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        console.log("Progress synchronized to Cloudflare KV successfully.");
+      } else {
+        console.error("Cloudflare KV sync failed", data.error);
+      }
+    })
+    .catch(err => console.error("Error syncing progress", err))
+    .finally(() => {
+      setSyncLoading(false);
+    });
+  };
+
+  // Helper to pull state from server KV
+  const fetchRemoteProgress = (password) => {
+    fetch('/api/progress')
+      .then(res => res.json())
+      .then(data => {
+        if (data.progress) {
+          const remoteData = data.progress;
+          if (remoteData.completedMissions) {
+            setCompletedMissions(remoteData.completedMissions);
+            const today = getTodayString();
+            localStorage.setItem(`operator_completed_${today}`, JSON.stringify(remoteData.completedMissions));
+          }
+          if (remoteData.profile) {
+            setProfile(remoteData.profile);
+            localStorage.setItem('operator_profile', JSON.stringify(remoteData.profile));
+          }
+        } else {
+          // Push initial profile to Cloudflare KV if none exists yet
+          saveProgressToServer(password, completedMissions, profile);
+        }
+      })
+      .catch(err => console.error("Could not fetch remote progress", err))
+      .finally(() => {
+        setIsInitialLoading(false);
+      });
+  };
+
+  // Validation on Mount
+  useEffect(() => {
+    const savedPasscode = localStorage.getItem('operator_passcode');
+    if (savedPasscode) {
+      fetch('/api/auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: savedPasscode })
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          setPasscode(savedPasscode);
+          setIsAuthenticated(true);
+          fetchRemoteProgress(savedPasscode);
+        } else {
+          localStorage.removeItem('operator_passcode');
+          setIsInitialLoading(false);
+        }
+      })
+      .catch(err => {
+        console.error("Mount auth verification failed", err);
+        setIsInitialLoading(false);
+      });
+    } else {
+      setIsInitialLoading(false);
+    }
+  }, []);
+
+  // Login submission
+  const handleLogin = (e) => {
+    e.preventDefault();
+    if (!passcode) return;
+    setAuthLoading(true);
+    setAuthError('');
+
+    fetch('/api/auth', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: passcode })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (data.success) {
+        localStorage.setItem('operator_passcode', passcode);
+        setIsAuthenticated(true);
+        fetchRemoteProgress(passcode);
+      } else {
+        setAuthError('INVALID ACCESS TOKEN // ACCESS DENIED');
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      setAuthError('CONNECTION ERROR // GATEWAY OFFLINE');
+    })
+    .finally(() => {
+      setAuthLoading(false);
+    });
+  };
+
   // Setup schedule highlighter
   useEffect(() => {
     const updateActiveBlock = () => {
       const now = new Date();
       const currentMins = now.getHours() * 60 + now.getMinutes();
       
-      // Determine if early morning before 05:30 (treat as sleep block from previous day)
       let calculatedMins = currentMins;
       if (currentMins < 330) {
-        calculatedMins = currentMins + 1440; // overnight minutes
+        calculatedMins = currentMins + 1440;
       }
 
       let activeIndex = -1;
@@ -140,7 +262,7 @@ export default function App() {
     };
 
     updateActiveBlock();
-    const interval = setInterval(updateActiveBlock, 10000); // update every 10s
+    const interval = setInterval(updateActiveBlock, 10000);
     return () => clearInterval(interval);
   }, []);
 
@@ -157,7 +279,6 @@ export default function App() {
         if (lastActive === today || lastActive === yesterday) {
           // Maintain current streak
         } else {
-          // More than 1 day gap, reset streak
           updatedProfile.streak = 0;
         }
       } else {
@@ -293,9 +414,79 @@ export default function App() {
       };
 
       localStorage.setItem('operator_profile', JSON.stringify(newProfile));
+      
+      // Sync with serverless KV store
+      const activePasscode = passcode || localStorage.getItem('operator_passcode');
+      if (activePasscode) {
+        saveProgressToServer(activePasscode, updatedMissions, newProfile);
+      }
+
       return newProfile;
     });
   };
+
+  if (isInitialLoading) {
+    return (
+      <div className="login-overlay">
+        <div className="login-box" style={{ maxWidth: '380px', textAlign: 'center' }}>
+          <div className="login-title" style={{ justifyContent: 'center', marginBottom: '16px' }}>
+            <span className="pulse-dot"></span>
+            INITIALISING TAC-NET...
+          </div>
+          <div className="login-logs">
+            <span className="login-log-line">Establishing secure pipeline...</span>
+            <span className="login-log-line">Loading remote telemetry...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="login-overlay">
+        <form className="login-box" onSubmit={handleLogin}>
+          <div className="login-title-bar">
+            <div className="login-title">
+              <span className="pulse-dot"></span>
+              SYSTEM SECURITY CONTROL
+            </div>
+          </div>
+          
+          <div className="login-logs">
+            <span className="login-log-line">[!] WARNING: ACCESS RESTRICTED TO AUTHORIZED OPERATORS ONLY</span>
+            <span className="login-log-line">[!] TARGET HOST: OPERATOR TERMINAL // DEEP GRID</span>
+            <span className="login-log-line">[!] ENTER MASTER PASSCODE TO DECRYPT INTERFACE</span>
+          </div>
+
+          <div className="login-input-group">
+            <label className="login-input-label">Authorization Token</label>
+            <div className="login-input-wrapper">
+              <span className="login-prompt-arrow">PASSCODE&gt;</span>
+              <input 
+                type="password" 
+                className="login-input" 
+                value={passcode} 
+                onChange={(e) => setPasscode(e.target.value)} 
+                required 
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <button className="login-btn" type="submit" disabled={authLoading}>
+            {authLoading ? 'Verifying...' : 'Authorize Operator'}
+          </button>
+
+          {authError && (
+            <div className="login-error">
+              <span>[!] ERROR: {authError}</span>
+            </div>
+          )}
+        </form>
+      </div>
+    );
+  }
 
   return (
     <div className="app-container">
@@ -314,6 +505,9 @@ export default function App() {
           <div className="operator-tag">
             <span className="pulse-dot"></span>
             OPERATOR: YASH
+            <span style={{ fontSize: '11px', color: syncLoading ? '#f5a623' : '#22c55e', marginLeft: '10px', fontWeight: 'normal', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
+              {syncLoading ? '[SYNCING...]' : '[ONLINE]'}
+            </span>
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <span className="streak-counter">
