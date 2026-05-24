@@ -159,15 +159,42 @@ export default function App() {
       .then(data => {
         if (data.progress) {
           const remoteData = data.progress;
-          if (remoteData.completedMissions) {
-            setCompletedMissions(remoteData.completedMissions);
-            const today = getTodayString();
-            localStorage.setItem(`operator_completed_${today}`, JSON.stringify(remoteData.completedMissions));
-          }
+          const today = getTodayString();
+          const yesterday = getYesterdayString();
+          
+          let resolvedMissions = {};
+          let resolvedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
+          
           if (remoteData.profile) {
-            setProfile(remoteData.profile);
-            localStorage.setItem('operator_profile', JSON.stringify(remoteData.profile));
+            resolvedProfile = { ...remoteData.profile };
+            const lastActive = resolvedProfile.lastActiveDate;
+            if (lastActive) {
+              if (lastActive === today || lastActive === yesterday) {
+                // Streak is maintained
+              } else {
+                // Streak broken (missed at least one full day)
+                resolvedProfile.streak = 0;
+              }
+            } else {
+              resolvedProfile.streak = 0;
+            }
           }
+          
+          // Only load remote completed missions if they were completed today
+          if (remoteData.profile && remoteData.profile.lastActiveDate === today) {
+            if (remoteData.completedMissions) {
+              resolvedMissions = remoteData.completedMissions;
+            }
+          } else {
+            // Otherwise, start fresh for the new day
+            resolvedMissions = {};
+          }
+          
+          setCompletedMissions(resolvedMissions);
+          localStorage.setItem(`operator_completed_${today}`, JSON.stringify(resolvedMissions));
+          
+          setProfile(resolvedProfile);
+          localStorage.setItem('operator_profile', JSON.stringify(resolvedProfile));
         } else {
           // Push initial profile to Cloudflare KV if none exists yet
           saveProgressToServer(password, completedMissions, profile);
