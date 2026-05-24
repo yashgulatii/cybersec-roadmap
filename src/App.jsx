@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from 'react';
 import './index.css';
 
+const storage = typeof window !== 'undefined' && window.storage ? window.storage : localStorage;
+
 // Daily missions definitions
 const DAILY_MISSIONS = [
   { id: 'daily_ports', title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
@@ -93,7 +95,7 @@ export default function App() {
 
   // Profile state
   const [profile, setProfile] = useState(() => {
-    const saved = localStorage.getItem('operator_profile');
+    const saved = storage.getItem('operator_profile');
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -107,7 +109,7 @@ export default function App() {
   // Completed missions for today
   const [completedMissions, setCompletedMissions] = useState(() => {
     const today = getTodayString();
-    const saved = localStorage.getItem(`operator_completed_${today}`);
+    const saved = storage.getItem(`operator_completed_${today}`);
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -123,6 +125,48 @@ export default function App() {
 
   // Particle effect state
   const [particles, setParticles] = useState([]);
+
+  // Mission logs expansion state
+  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
+
+  // Compute mission logs dynamically from storage
+  const missionLogs = useMemo(() => {
+    const logsByDate = {};
+    
+    const getKeys = () => {
+      try {
+        const keys = [];
+        if (typeof storage.key === 'function') {
+          for (let i = 0; i < storage.length; i++) {
+            keys.push(storage.key(i));
+          }
+        } else {
+          keys.push(...Object.keys(storage));
+        }
+        return keys;
+      } catch {
+        return Object.keys(localStorage).concat(Object.keys(window.storage || {}));
+      }
+    };
+
+    const keys = getKeys();
+    keys.forEach(key => {
+      if (key && key.startsWith('log:')) {
+        const dateStr = key.substring(4); // YYYY-MM-DD
+        try {
+          const dayLogs = JSON.parse(storage.getItem(key) || '[]');
+          if (dayLogs && dayLogs.length > 0) {
+            logsByDate[dateStr] = dayLogs;
+          }
+        } catch (e) {
+          console.error("Failed to parse logs for key", key, e);
+        }
+      }
+    });
+    
+    return logsByDate;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [completedMissions]);
 
   // Helpers to push state to server KV
   const saveProgressToServer = (password, missions, prof) => {
@@ -191,10 +235,10 @@ export default function App() {
           }
           
           setCompletedMissions(resolvedMissions);
-          localStorage.setItem(`operator_completed_${today}`, JSON.stringify(resolvedMissions));
+          storage.setItem(`operator_completed_${today}`, JSON.stringify(resolvedMissions));
           
           setProfile(resolvedProfile);
-          localStorage.setItem('operator_profile', JSON.stringify(resolvedProfile));
+          storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
         } else {
           // Push initial profile to Cloudflare KV if none exists yet
           saveProgressToServer(password, completedMissions, profile);
@@ -208,7 +252,18 @@ export default function App() {
 
   // Validation on Mount
   useEffect(() => {
-    const savedPasscode = localStorage.getItem('operator_passcode');
+    // Daily Reset Check
+    const todayDateStr = new Date().toDateString();
+    const storedDate = storage.getItem('operator_completion_date');
+    if (storedDate !== todayDateStr) {
+      setTimeout(() => {
+        setCompletedMissions({});
+      }, 0);
+      storage.setItem(`operator_completed_${getTodayString()}`, JSON.stringify({}));
+      storage.setItem('operator_completion_date', todayDateStr);
+    }
+
+    const savedPasscode = storage.getItem('operator_passcode');
     if (savedPasscode) {
       fetch('/api/auth', {
         method: 'POST',
@@ -222,7 +277,7 @@ export default function App() {
           setIsAuthenticated(true);
           fetchRemoteProgress(savedPasscode);
         } else {
-          localStorage.removeItem('operator_passcode');
+          storage.removeItem('operator_passcode');
           setIsInitialLoading(false);
         }
       })
@@ -250,7 +305,7 @@ export default function App() {
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        localStorage.setItem('operator_passcode', passcode);
+        storage.setItem('operator_passcode', passcode);
         setIsAuthenticated(true);
         fetchRemoteProgress(passcode);
       } else {
@@ -312,7 +367,7 @@ export default function App() {
         updatedProfile.streak = 0;
       }
 
-      localStorage.setItem('operator_profile', JSON.stringify(updatedProfile));
+      storage.setItem('operator_profile', JSON.stringify(updatedProfile));
       return updatedProfile;
     });
   }, []);
@@ -392,6 +447,21 @@ export default function App() {
       setTimeout(() => {
         setParticles(prev => prev.filter(p => p.id !== newParticle.id));
       }, 1000);
+
+      // Completion Logging
+      const m = DAILY_MISSIONS.find(x => x.id === missionId) || SIDE_MISSIONS.find(x => x.id === missionId);
+      if (m) {
+        const logKey = `log:${today}`;
+        const existingLogs = JSON.parse(storage.getItem(logKey) || '[]');
+        const logEntry = {
+          name: m.title,
+          xp: m.xp,
+          tag: m.category,
+          timestamp: new Date().toISOString()
+        };
+        existingLogs.push(logEntry);
+        storage.setItem(logKey, JSON.stringify(existingLogs));
+      }
     }
 
     const updatedMissions = {
@@ -405,7 +475,7 @@ export default function App() {
     }
 
     setCompletedMissions(updatedMissions);
-    localStorage.setItem(`operator_completed_${today}`, JSON.stringify(updatedMissions));
+    storage.setItem(`operator_completed_${today}`, JSON.stringify(updatedMissions));
 
     // Update profile total XP and streak
     setProfile(prev => {
@@ -440,10 +510,10 @@ export default function App() {
         lastActiveDate: newLastActive
       };
 
-      localStorage.setItem('operator_profile', JSON.stringify(newProfile));
+      storage.setItem('operator_profile', JSON.stringify(newProfile));
       
       // Sync with serverless KV store
-      const activePasscode = passcode || localStorage.getItem('operator_passcode');
+      const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
         saveProgressToServer(activePasscode, updatedMissions, newProfile);
       }
@@ -704,6 +774,187 @@ export default function App() {
                   );
                 })}
               </div>
+            </section>
+
+            {/* MISSION LOGS */}
+            <section className="mission-logs-section">
+              <div 
+                className="panel-title-clickable" 
+                onClick={() => setIsLogsExpanded(!isLogsExpanded)} 
+                style={{ 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  userSelect: 'none'
+                }}
+              >
+                <h2 className="panel-title" style={{ margin: 0 }}>📊 MISSION LOGS</h2>
+                <span 
+                  className="collapse-arrow" 
+                  style={{ 
+                    color: 'var(--accent-amber)', 
+                    fontFamily: 'var(--font-mono)', 
+                    fontSize: '13px',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  {isLogsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+                </span>
+              </div>
+              <hr className="section-divider" />
+              
+              {isLogsExpanded && (
+                <div className="logs-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                  {Object.keys(missionLogs).length === 0 ? (
+                    <div 
+                      className="empty-logs-msg" 
+                      style={{ 
+                        padding: '16px', 
+                        border: '1px dashed var(--border-color)', 
+                        color: 'var(--text-muted)', 
+                        fontFamily: 'var(--font-mono)', 
+                        fontSize: '13px', 
+                        textAlign: 'center',
+                        background: 'rgba(0, 0, 0, 0.2)'
+                      }}
+                    >
+                      NO SYSTEM LOGS RECORDED // SYSTEM IDLE
+                    </div>
+                  ) : (
+                    Object.keys(missionLogs)
+                      .sort((a, b) => b.localeCompare(a))
+                      .map(date => {
+                        const dayLogs = missionLogs[date];
+                        const totalXp = dayLogs.reduce((sum, log) => sum + (log.xp || 0), 0);
+                        return (
+                          <div 
+                            key={date} 
+                            className="day-logs-card" 
+                            style={{ 
+                              background: 'var(--bg-card)', 
+                              border: '1px solid var(--border-color)', 
+                              padding: '16px',
+                              position: 'relative'
+                            }}
+                          >
+                            <div 
+                              className="day-logs-header" 
+                              style={{ 
+                                display: 'flex', 
+                                justifyContent: 'space-between', 
+                                alignItems: 'center', 
+                                marginBottom: '12px', 
+                                borderBottom: '1px dashed var(--border-color)', 
+                                paddingBottom: '8px' 
+                              }}
+                            >
+                              <span 
+                                className="day-date" 
+                                style={{ 
+                                  fontFamily: 'var(--font-mono)', 
+                                  fontSize: '14px', 
+                                  color: 'var(--accent-amber)', 
+                                  fontWeight: 'bold' 
+                                }}
+                              >
+                                📅 LOG_DATE: {date}
+                              </span>
+                              <span 
+                                className="day-total-xp" 
+                                style={{ 
+                                  fontFamily: 'var(--font-mono)', 
+                                  fontSize: '13px', 
+                                  color: 'var(--accent-green)', 
+                                  fontWeight: 'bold' 
+                                }}
+                              >
+                                +{totalXp} XP EARNED
+                              </span>
+                            </div>
+                            <div 
+                              className="day-logs-list" 
+                              style={{ 
+                                display: 'flex', 
+                                flexDirection: 'column', 
+                                gap: '8px' 
+                              }}
+                            >
+                              {dayLogs.map((log, idx) => {
+                                const logTime = new Date(log.timestamp);
+                                const formattedTime = `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`;
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className="log-entry-row" 
+                                    style={{ 
+                                      display: 'flex', 
+                                      justifyContent: 'space-between', 
+                                      alignItems: 'center', 
+                                      padding: '6px 10px', 
+                                      background: 'rgba(255, 255, 255, 0.01)', 
+                                      borderLeft: '3px solid var(--accent-amber)',
+                                      border: '1px solid rgba(255, 255, 255, 0.02)',
+                                      borderLeftColor: 'var(--accent-amber)'
+                                    }}
+                                  >
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                                      <span 
+                                        className={`badge badge-${(log.tag || '').toLowerCase()}`} 
+                                        style={{ 
+                                          fontSize: '9px', 
+                                          padding: '1px 5px',
+                                          whiteSpace: 'nowrap'
+                                        }}
+                                      >
+                                        {log.tag}
+                                      </span>
+                                      <span 
+                                        className="log-entry-name" 
+                                        style={{ 
+                                          fontSize: '13px', 
+                                          color: 'var(--text-main)',
+                                          whiteSpace: 'nowrap',
+                                          overflow: 'hidden',
+                                          textOverflow: 'ellipsis'
+                                        }}
+                                      >
+                                        {log.name}
+                                      </span>
+                                    </div>
+                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                      <span 
+                                        className="log-entry-xp" 
+                                        style={{ 
+                                          color: 'var(--accent-amber)', 
+                                          fontFamily: 'var(--font-mono)', 
+                                          fontSize: '12px', 
+                                          fontWeight: 'bold' 
+                                        }}
+                                      >
+                                        +{log.xp} XP
+                                      </span>
+                                      <span 
+                                        className="log-entry-time" 
+                                        style={{ 
+                                          color: 'var(--text-muted)', 
+                                          fontFamily: 'var(--font-mono)', 
+                                          fontSize: '11px' 
+                                        }}
+                                      >
+                                        [{formattedTime}]
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })
+                  )}
+                </div>
+              )}
             </section>
           </div>
         )}
