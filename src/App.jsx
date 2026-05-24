@@ -11,7 +11,10 @@ const DAILY_MISSIONS = [
   { id: 'daily_apply', title: 'Apply to 5 roles (Naukri/LinkedIn)', category: 'OPS', xp: 75, stat: 'OPS', bonus: 8 },
   { id: 'daily_build', title: 'Work on AD Lab (2h deep session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
   { id: 'daily_interview', title: 'Record yourself answering 1 interview Q', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 },
-  { id: 'daily_labs', title: '1 TryHackMe room or PortSwigger lab', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 }
+  { id: 'daily_labs', title: '1 TryHackMe room or PortSwigger lab', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
+  { id: 'daily_wireshark', title: 'Analyze a PCAP in Wireshark (15m drill)', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
+  { id: 'daily_linux_cmd', title: 'Practice 10 advanced Linux CLI commands', category: 'ROADMAP', xp: 45, stat: 'SIGINT', bonus: 4 },
+  { id: 'daily_splunk_query', title: 'Write 3 complex Splunk SPL search queries', category: 'BUILD', xp: 55, stat: 'ARSENAL', bonus: 5 }
 ];
 
 // Project Board definitions
@@ -48,7 +51,9 @@ const SIDE_MISSIONS = [
   { id: 'side_read', title: 'Read 10 pages non-tech book', category: 'INTEL', xp: 20, stat: 'DISCIPLINE', bonus: 2 },
   { id: 'side_ctf', title: 'CTF challenge (for fun)', category: 'GAMING', xp: 35, stat: 'SIGINT', bonus: 4 },
   { id: 'side_reflect', title: 'Reflect on week in writing', category: 'GROWTH', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
-  { id: 'side_reachout', title: "Reach out to someone you haven't spoken to", category: 'SOCIAL', xp: 20, stat: 'DISCIPLINE', bonus: 2 }
+  { id: 'side_reachout', title: "Reach out to someone you haven't spoken to", category: 'SOCIAL', xp: 20, stat: 'DISCIPLINE', bonus: 2 },
+  { id: 'side_hydration', title: 'Drink 4L of water today', category: 'PHYSICAL', xp: 20, stat: 'ENDURANCE', bonus: 2 },
+  { id: 'side_clean_desk', title: 'Declutter workspace & desk setup', category: 'DISCIPLINE', xp: 15, stat: 'DISCIPLINE', bonus: 2 }
 ];
 
 // Schedule blocks definitions (times map to minutes of day for highlighting)
@@ -723,27 +728,49 @@ export default function App() {
               <h2 className="panel-title">Daily Ops</h2>
               <hr className="section-divider" />
               <div className="missions-grid">
-                {DAILY_MISSIONS.map(m => {
-                  const isCompleted = !!completedMissions[m.id];
-                  return (
-                    <div 
-                      key={m.id} 
-                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                      onClick={(e) => handleToggleMission(m.id, m.xp, e)}
-                    >
-                      <div className="checkbox-container">
-                        <span className="checkmark-icon"></span>
+                {(() => {
+                  const activeMissions = DAILY_MISSIONS.filter(m => !completedMissions[m.id]).slice(0, 4);
+                  if (activeMissions.length === 0) {
+                    return (
+                      <div 
+                        style={{ 
+                          padding: '24px', 
+                          border: '1px dashed var(--accent-green)', 
+                          background: 'rgba(34, 197, 94, 0.02)', 
+                          color: 'var(--accent-green)', 
+                          textAlign: 'center', 
+                          fontFamily: 'var(--font-mono)', 
+                          fontSize: '14px',
+                          gridColumn: 'span 2',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        [!] SYSTEM SECURED // ALL DAILY OPS COMPLETED FOR TODAY
                       </div>
-                      <div className="mission-details">
-                        <span className="mission-title">{m.title}</span>
-                        <div className="mission-meta">
-                          <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
-                          <span className="xp-reward">+{m.xp} XP</span>
+                    );
+                  }
+                  return activeMissions.map(m => {
+                    const isCompleted = !!completedMissions[m.id];
+                    return (
+                      <div 
+                        key={m.id} 
+                        className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                        onClick={(e) => handleToggleMission(m.id, m.xp, e)}
+                      >
+                        <div className="checkbox-container">
+                          <span className="checkmark-icon"></span>
+                        </div>
+                        <div className="mission-details">
+                          <span className="mission-title">{m.title}</span>
+                          <div className="mission-meta">
+                            <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
+                            <span className="xp-reward">+{m.xp} XP</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
             </section>
 
@@ -752,27 +779,49 @@ export default function App() {
               <h2 className="panel-title">Side Ops</h2>
               <hr className="section-divider" />
               <div className="missions-grid">
-                {SIDE_MISSIONS.map(m => {
-                  const isCompleted = !!completedMissions[m.id];
-                  return (
-                    <div 
-                      key={m.id} 
-                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                      onClick={(e) => handleToggleMission(m.id, m.xp, e)}
-                    >
-                      <div className="checkbox-container">
-                        <span className="checkmark-icon"></span>
+                {(() => {
+                  const activeMissions = SIDE_MISSIONS.filter(m => !completedMissions[m.id]).slice(0, 4);
+                  if (activeMissions.length === 0) {
+                    return (
+                      <div 
+                        style={{ 
+                          padding: '24px', 
+                          border: '1px dashed var(--accent-green)', 
+                          background: 'rgba(34, 197, 94, 0.02)', 
+                          color: 'var(--accent-green)', 
+                          textAlign: 'center', 
+                          fontFamily: 'var(--font-mono)', 
+                          fontSize: '14px',
+                          gridColumn: 'span 2',
+                          letterSpacing: '0.05em'
+                        }}
+                      >
+                        [!] DISCIPLINE MAINTAINED // ALL SIDE OPS COMPLETED FOR TODAY
                       </div>
-                      <div className="mission-details">
-                        <span className="mission-title">{m.title}</span>
-                        <div className="mission-meta">
-                          <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
-                          <span className="xp-reward">+{m.xp} XP</span>
+                    );
+                  }
+                  return activeMissions.map(m => {
+                    const isCompleted = !!completedMissions[m.id];
+                    return (
+                      <div 
+                        key={m.id} 
+                        className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                        onClick={(e) => handleToggleMission(m.id, m.xp, e)}
+                      >
+                        <div className="checkbox-container">
+                          <span className="checkmark-icon"></span>
+                        </div>
+                        <div className="mission-details">
+                          <span className="mission-title">{m.title}</span>
+                          <div className="mission-meta">
+                            <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
+                            <span className="xp-reward">+{m.xp} XP</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
+                    );
+                  });
+                })()}
               </div>
             </section>
 
