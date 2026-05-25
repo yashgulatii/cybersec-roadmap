@@ -1079,3 +1079,44 @@ body::after {
   padding: 8px 12px;
   background: rgba(255, 111, 97, 0.04);
 }
+
+/* UNLOCKED PROGRESSIVE CARD FLASH ANIMATION */
+@keyframes unlock-flash-glow {
+  0% {
+    border-color: var(--accent-green);
+    box-shadow: 0 0 15px rgba(34, 197, 94, 0.4);
+    background: rgba(34, 197, 94, 0.1);
+  }
+  100% {
+    border-color: var(--border-color);
+    box-shadow: none;
+    background: var(--bg-card);
+  }
+}
+
+.unlocked-flash {
+  animation: unlock-flash-glow 2s cubic-bezier(0.25, 1, 0.5, 1) 1;
+}
+
+/* DARK CYBERPUNK DATE PICKER */
+.dark-date-picker {
+  background: var(--bg-terminal);
+  border: 1px solid var(--border-color);
+  color: var(--accent-amber);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  padding: 6px 12px;
+  outline: none;
+  transition: all 0.2s ease-in-out;
+}
+
+.dark-date-picker:focus {
+  border-color: var(--accent-amber);
+  box-shadow: 0 0 8px var(--accent-amber-glow);
+}
+
+/* Calendar icon styling for WebKit based browsers */
+.dark-date-picker::-webkit-calendar-picker-indicator {
+  filter: invert(72%) sepia(85%) saturate(834%) hue-rotate(346deg) brightness(101%) contrast(93%);
+  cursor: pointer;
+}

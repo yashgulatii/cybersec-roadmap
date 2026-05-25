@@ -13,7 +13,7 @@ export async function onRequestPost(context) {
         'Access-Control-Allow-Origin': '*',
       },
     });
-  } catch (e) {
+  } catch {
     return new Response(JSON.stringify({ success: false }), { status: 400 });
   }
 }

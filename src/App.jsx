@@ -3,21 +3,82 @@ import './index.css';
 
 const storage = typeof window !== 'undefined' && window.storage ? window.storage : localStorage;
 
-// Daily missions definitions
-const DAILY_MISSIONS = [
-  { id: 'daily_ports', title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-  { id: 'daily_osi', title: 'OSI model: all 7 layers cold recall', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-  { id: 'daily_ad_theory', title: 'Study Active Directory concepts (Kerberos, LDAP, AD structure)', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
-  { id: 'daily_apply', title: 'Apply to 5 roles (Naukri/LinkedIn)', category: 'OPS', xp: 75, stat: 'OPS', bonus: 8 },
-  { id: 'daily_build', title: 'Work on AD Lab (2h deep session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
-  { id: 'daily_interview', title: 'Record yourself answering 1 interview Q', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 },
-  { id: 'daily_labs', title: '1 TryHackMe room or PortSwigger lab', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
-  { id: 'daily_wireshark', title: 'Analyze a PCAP in Wireshark (15m drill)', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
-  { id: 'daily_linux_cmd', title: 'Practice 10 advanced Linux CLI commands', category: 'ROADMAP', xp: 45, stat: 'SIGINT', bonus: 4 },
-  { id: 'daily_splunk_query', title: 'Write 3 complex Splunk SPL search queries', category: 'BUILD', xp: 55, stat: 'ARSENAL', bonus: 5 }
+let particleCounter = 0;
+
+// Type A - 12 Fixed Daily Tasks
+const FIXED_TASKS = [
+  { id: 'fixed:morning_ritual', title: 'Morning ritual complete (no screen)', category: 'DISCIPLINE', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'fixed:post_nap_exercise', title: 'Post-nap exercise done', category: 'PHYSICAL', xp: 30, stat: 'ENDURANCE', bonus: 4 },
+  { id: 'fixed:evening_patrol', title: 'Evening patrol with friend (full hour)', category: 'SOCIAL', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'fixed:after_action_report', title: 'After action report written', category: 'DISCIPLINE', xp: 20, stat: 'DISCIPLINE', bonus: 3 },
+  { id: 'fixed:apply_roles', title: 'Apply to 5 roles (Naukri/LinkedIn)', category: 'OPS', xp: 75, stat: 'OPS', bonus: 8 },
+  { id: 'fixed:cold_email', title: 'Cold email outreach (2 companies)', category: 'OPS', xp: 50, stat: 'OPS', bonus: 5 },
+  { id: 'fixed:record_interview', title: 'Record yourself answering 1 interview Q', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 },
+  { id: 'fixed:review_star', title: 'Review 1 STAR answer and refine it', category: 'COMMS', xp: 35, stat: 'COMMS', bonus: 3 },
+  { id: 'fixed:update_linkedin', title: 'Update LinkedIn or resume if needed', category: 'OPS', xp: 25, stat: 'OPS', bonus: 2 },
+  { id: 'fixed:read_article', title: 'Read 1 article: threat intel / AppSec / SOC', category: 'INTEL', xp: 30, stat: 'SIGINT', bonus: 3 },
+  { id: 'fixed:drink_water', title: 'Drink 3L water', category: 'PHYSICAL', xp: 15, stat: 'ENDURANCE', bonus: 2 },
+  { id: 'fixed:sleep_early', title: 'Sleep before 1AM', category: 'DISCIPLINE', xp: 20, stat: 'DISCIPLINE', bonus: 2 }
 ];
 
-// Project Board definitions
+// Type B - 6 Progressive Chain Tasks
+const CHAINS = {
+  'Networking Fundamentals': [
+    { title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+    { title: 'Memorise top 25 ports (Groups 3–4)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+    { title: 'OSI model: all 7 layers cold recall', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+    { title: 'TCP/IP model vs OSI — where they differ', category: 'ROADMAP', xp: 45, stat: 'SIGINT', bonus: 4 },
+    { title: 'Subnetting basics (CIDR, /24, /16)', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
+    { title: 'Nmap: basic scan types (-sS, -sV, -sC)', category: 'ROADMAP', xp: 60, stat: 'SIGINT', bonus: 6 },
+    { title: 'Nmap: advanced (OS detect, scripts, timing)', category: 'ROADMAP', xp: 65, stat: 'SIGINT', bonus: 6 },
+    { title: 'Wireshark: capture and filter basics', category: 'ROADMAP', xp: 60, stat: 'SIGINT', bonus: 6 },
+    { title: 'DNS, DHCP, ARP — how each works', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
+    { title: 'HTTP vs HTTPS, TLS handshake', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 }
+  ],
+  'Active Directory': [
+    { title: 'AD concepts: Kerberos, LDAP, AD structure', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
+    { title: 'AD Lab: setup and domain join (2h session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
+    { title: 'AD enumeration with BloodHound', category: 'LABS', xp: 70, stat: 'SIGINT', bonus: 7 },
+    { title: 'Kerberoasting attack walkthrough', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
+    { title: 'Pass-the-Hash and Pass-the-Ticket', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
+    { title: 'AD privilege escalation paths', category: 'LABS', xp: 80, stat: 'SIGINT', bonus: 8 },
+    { title: 'AD defence: what defenders look for', category: 'INTEL', xp: 65, stat: 'SIGINT', bonus: 6 }
+  ],
+  'Web AppSec': [
+    { title: 'OWASP Top 10: read and summarise', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
+    { title: 'Burp Suite: intercept and repeat a request', category: 'LABS', xp: 55, stat: 'SIGINT', bonus: 5 },
+    { title: 'PortSwigger: SQL Injection lab', category: 'LABS', xp: 60, stat: 'SIGINT', bonus: 6 },
+    { title: 'PortSwigger: XSS lab', category: 'LABS', xp: 60, stat: 'SIGINT', bonus: 6 },
+    { title: 'PortSwigger: IDOR lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
+    { title: 'PortSwigger: SSRF lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
+    { title: 'PortSwigger: Auth bypass lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
+    { title: 'Write a 1-page VAPT mini-report on any finding', category: 'BUILD', xp: 75, stat: 'ARSENAL', bonus: 7 }
+  ],
+  'TryHackMe / Labs': [
+    { title: 'Complete 1 THM room (any)', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
+    { title: 'Complete another THM room or Hack The Box intro', category: 'LABS', xp: 55, stat: 'SIGINT', bonus: 5 },
+    { title: 'Complete a TryHackMe learning path module', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 }
+  ],
+  'Interview Prep': [
+    { title: 'Study 5 SOC analyst interview Qs', category: 'COMMS', xp: 45, stat: 'COMMS', bonus: 4 },
+    { title: 'Study 5 AppSec interview Qs', category: 'COMMS', xp: 45, stat: 'COMMS', bonus: 4 },
+    { title: 'Write STAR story: IDOR finding from your internship', category: 'COMMS', xp: 55, stat: 'COMMS', bonus: 5 },
+    { title: 'Write STAR story: pick one offensive security tool you built', category: 'COMMS', xp: 55, stat: 'COMMS', bonus: 5 },
+    { title: 'Mock interview: answer 3 Qs out loud, record', category: 'COMMS', xp: 60, stat: 'COMMS', bonus: 6 },
+    { title: 'Review recording, write improvement notes', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 }
+  ],
+  'AD Attack & Detection Lab': [
+    { title: 'AD Lab: setup and domain join (2h session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
+    { title: 'AD enumeration with BloodHound', category: 'LABS', xp: 70, stat: 'SIGINT', bonus: 7 },
+    { title: 'Kerberoasting attack walkthrough', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
+    { title: 'Pass-the-Hash and Pass-the-Ticket', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
+    { title: 'AD privilege escalation paths', category: 'LABS', xp: 80, stat: 'SIGINT', bonus: 8 },
+    { title: 'Build a detection rule for one attack', category: 'BUILD', xp: 80, stat: 'ARSENAL', bonus: 8 },
+    { title: 'Document findings in a lab report', category: 'BUILD', xp: 65, stat: 'ARSENAL', bonus: 6 }
+  ]
+};
+
+// Existing 3 Project Board cards
 const PROJECTS = [
   {
     name: 'THREAT INTEL CORRELATION ENGINE',
@@ -42,20 +103,6 @@ const PROJECTS = [
   }
 ];
 
-// Side missions definitions
-const SIDE_MISSIONS = [
-  { id: 'side_morning', title: 'Morning ritual complete (no screen, Surya)', category: 'DISCIPLINE', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
-  { id: 'side_exercise', title: 'Post-nap exercise done', category: 'PHYSICAL', xp: 30, stat: 'ENDURANCE', bonus: 4 },
-  { id: 'side_patrol', title: 'Evening patrol with friend (full hour)', category: 'SOCIAL', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
-  { id: 'side_aar', title: 'After action report written', category: 'DISCIPLINE', xp: 20, stat: 'DISCIPLINE', bonus: 3 },
-  { id: 'side_read', title: 'Read 10 pages non-tech book', category: 'INTEL', xp: 20, stat: 'DISCIPLINE', bonus: 2 },
-  { id: 'side_ctf', title: 'CTF challenge (for fun)', category: 'GAMING', xp: 35, stat: 'SIGINT', bonus: 4 },
-  { id: 'side_reflect', title: 'Reflect on week in writing', category: 'GROWTH', xp: 25, stat: 'DISCIPLINE', bonus: 3 },
-  { id: 'side_reachout', title: "Reach out to someone you haven't spoken to", category: 'SOCIAL', xp: 20, stat: 'DISCIPLINE', bonus: 2 },
-  { id: 'side_hydration', title: 'Drink 4L of water today', category: 'PHYSICAL', xp: 20, stat: 'ENDURANCE', bonus: 2 },
-  { id: 'side_clean_desk', title: 'Declutter workspace & desk setup', category: 'DISCIPLINE', xp: 15, stat: 'DISCIPLINE', bonus: 2 }
-];
-
 // Schedule blocks definitions (times map to minutes of day for highlighting)
 const SCHEDULE_BLOCKS = [
   { time: '05:30', name: 'WAKE + RITUAL', category: 'recovery', desc: 'Bath · Surya · no screen', startMin: 330, endMin: 390 },
@@ -72,10 +119,10 @@ const SCHEDULE_BLOCKS = [
   { time: '20:00', name: 'INTEL REVIEW', category: 'light', desc: 'Read · tech content · 1 hour', startMin: 1200, endMin: 1260 },
   { time: '21:00', name: 'AFTER ACTION', category: 'prep', desc: 'Journal · plan tomorrow · 30 min', startMin: 1260, endMin: 1290 },
   { time: '21:30', name: 'COMMS BLACKOUT', category: 'recovery', desc: 'No screens until sleep', startMin: 1290, endMin: 1350 },
-  { time: '22:30', name: 'STAND DOWN', category: 'recovery', desc: 'Sleep', startMin: 1350, endMin: 1770 } // overnight
+  { time: '22:30', name: 'STAND DOWN', category: 'recovery', desc: 'Sleep', startMin: 1350, endMin: 1770 }
 ];
 
-// Helpers for Date calculations
+// Helper calculations for Date strings
 const getTodayString = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -87,6 +134,137 @@ const getYesterdayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+// Day Transition & Initial Telemetry State Setup
+const initializeTelemetry = () => {
+  const today = getTodayString();
+  const lastActiveDate = storage.getItem('operator_completion_date');
+  
+  let chainProgress = {
+    'Networking Fundamentals': 0,
+    'Active Directory': 0,
+    'Web AppSec': 0,
+    'TryHackMe / Labs': 0,
+    'Interview Prep': 0,
+    'AD Attack & Detection Lab': 0
+  };
+  
+  const savedChainProg = storage.getItem('chainProgress');
+  if (savedChainProg) {
+    try {
+      Object.assign(chainProgress, JSON.parse(savedChainProg));
+    } catch (err) {
+      console.error("Failed to parse chainProgress", err);
+    }
+  }
+
+  // Detect day transition
+  if (lastActiveDate && lastActiveDate !== today) {
+    // Load yesterday's state
+    const yesterdayStateKey = `state:${lastActiveDate}`;
+    const yesterdayStateRaw = storage.getItem(yesterdayStateKey);
+    let yesterdayCompletedTaskIds = [];
+    if (yesterdayStateRaw) {
+      try {
+        const parsed = JSON.parse(yesterdayStateRaw);
+        yesterdayCompletedTaskIds = parsed.completedTaskIds || [];
+      } catch (err) {
+        console.error("Failed to parse yesterday state", err);
+      }
+    }
+
+    // Retrieve yesterday's completion timestamps
+    const yesterdayTimesKey = `completion_times:${lastActiveDate}`;
+    const yesterdayTimesRaw = storage.getItem(yesterdayTimesKey);
+    let yesterdayTimes = {};
+    if (yesterdayTimesRaw) {
+      try {
+        yesterdayTimes = JSON.parse(yesterdayTimesRaw);
+      } catch (err) {
+        console.error("Failed to parse yesterday completion times", err);
+      }
+    }
+
+    const logEntries = [];
+    
+    // Process yesterday's fixed tasks (both completed and missed)
+    FIXED_TASKS.forEach(task => {
+      const isCompleted = yesterdayCompletedTaskIds.includes(task.id);
+      logEntries.push({
+        taskName: task.title,
+        tag: task.category,
+        xp: task.xp,
+        completedAt: isCompleted ? (yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`) : null,
+        type: isCompleted ? 'completed' : 'missed'
+      });
+    });
+
+    // Process yesterday's completed chain tasks
+    yesterdayCompletedTaskIds.forEach(id => {
+      if (id.startsWith('chain:')) {
+        const parts = id.split(':');
+        if (parts.length === 3) {
+          const chainName = parts[1];
+          const stepIdx = parseInt(parts[2], 10);
+          const chain = CHAINS[chainName];
+          if (chain && chain[stepIdx]) {
+            const stepTask = chain[stepIdx];
+            logEntries.push({
+              taskName: stepTask.title,
+              tag: stepTask.category,
+              xp: stepTask.xp,
+              completedAt: yesterdayTimes[id] || `${lastActiveDate}T12:00:00.000Z`,
+              type: 'completed'
+            });
+          }
+        }
+      }
+    });
+
+    // Save yesterday's log compile
+    storage.setItem(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+
+    // Advance permanent chainProgress for steps completed yesterday
+    Object.keys(CHAINS).forEach(chainName => {
+      const chain = CHAINS[chainName];
+      let currentP = chainProgress[chainName] || 0;
+      let nextP = currentP;
+      
+      while (true) {
+        const stepId = `chain:${chainName}:${nextP}`;
+        if (yesterdayCompletedTaskIds.includes(stepId)) {
+          nextP = (nextP + 1) % chain.length;
+          if (nextP === currentP) break; // completed entire chain loop
+        } else {
+          break;
+        }
+      }
+      chainProgress[chainName] = nextP;
+    });
+    storage.setItem('chainProgress', JSON.stringify(chainProgress));
+
+    // Clean up auxiliary yesterday times
+    storage.removeItem(yesterdayTimesKey);
+  }
+
+  // Save last active date as today
+  storage.setItem('operator_completion_date', today);
+
+  // Initialize today's state
+  let dailyState = { completedTaskIds: [], unlockedChainSteps: {} };
+  const savedState = storage.getItem(`state:${today}`);
+  if (savedState) {
+    try {
+      dailyState = JSON.parse(savedState);
+    } catch (err) {
+      console.error("Failed to parse today daily state", err);
+    }
+  } else {
+    storage.setItem(`state:${today}`, JSON.stringify(dailyState));
+  }
+
+  return { dailyState, chainProgress };
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('missions');
   
@@ -95,113 +273,115 @@ export default function App() {
   const [passcode, setPasscode] = useState('');
   const [authError, setAuthError] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  // Synchronous loading checks
+  const [isInitialLoading, setIsInitialLoading] = useState(() => {
+    const savedPasscode = storage.getItem('operator_passcode');
+    return !!savedPasscode;
+  });
   const [syncLoading, setSyncLoading] = useState(false);
 
-  // Profile state
+  // Profile state - load profile and correct streak synchronously on initialisation
   const [profile, setProfile] = useState(() => {
     const saved = storage.getItem('operator_profile');
+    let loadedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
     if (saved) {
       try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
+        loadedProfile = JSON.parse(saved);
+      } catch (err) {
+        console.error("Failed to parse operator profile", err);
       }
     }
-    return { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
-  });
 
-  // Completed missions for today
-  const [completedMissions, setCompletedMissions] = useState(() => {
     const today = getTodayString();
-    const saved = storage.getItem(`operator_completed_${today}`);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch (e) {
-        console.error(e);
+    const yesterday = getYesterdayString();
+    const lastActive = loadedProfile.lastActiveDate;
+
+    if (lastActive) {
+      if (lastActive === today || lastActive === yesterday) {
+        // Streak is maintained
+      } else {
+        loadedProfile.streak = 0;
       }
+    } else {
+      loadedProfile.streak = 0;
     }
-    return {};
+
+    storage.setItem('operator_profile', JSON.stringify(loadedProfile));
+    return loadedProfile;
   });
 
-  // Schedule timer index
-  const [activeBlockIndex, setActiveBlockIndex] = useState(-1);
+  // Run day transition & state initialization synchronously
+  const telemetry = useMemo(() => initializeTelemetry(), []);
 
-  // Particle effect state
+  // Today's daily state
+  const [dailyState, setDailyState] = useState(telemetry.dailyState);
+  
+  // Permanent chain step progress
+  const [chainProgress, setChainProgress] = useState(telemetry.chainProgress);
+  
+  // Particle effects for checked item XP gains
   const [particles, setParticles] = useState([]);
 
-  // Mission logs expansion state
-  const [isLogsExpanded, setIsLogsExpanded] = useState(false);
+  // Controls flash animations of newly unlocked tasks
+  const [justUnlockedStepId, setJustUnlockedStepId] = useState('');
 
-  // Compute mission logs dynamically from storage
-  const missionLogs = useMemo(() => {
-    const logsByDate = {};
+  // Logs expansion controls
+  const [isLogsExpanded, setIsLogsExpanded] = useState(true);
+
+  // Selected date picker lookup state (default to yesterday)
+  const [lookupDate, setLookupDate] = useState(getYesterdayString());
+
+  // Active schedule index
+  const [activeBlockIndex, setActiveBlockIndex] = useState(-1);
+
+  // Push telemetry packages to Serverless KV Store
+  const saveProgressToServer = (password, stateToday, prof, chainProg, timesToday) => {
+    setSyncLoading(true);
     
-    const getKeys = () => {
-      try {
-        const keys = [];
-        if (typeof storage.key === 'function') {
-          for (let i = 0; i < storage.length; i++) {
-            keys.push(storage.key(i));
-          }
-        } else {
-          keys.push(...Object.keys(storage));
-        }
-        return keys;
-      } catch {
-        return Object.keys(localStorage).concat(Object.keys(window.storage || {}));
+    const allKeys = [];
+    try {
+      for (let i = 0; i < storage.length; i++) {
+        allKeys.push(storage.key(i));
       }
-    };
-
-    const keys = getKeys();
-    keys.forEach(key => {
-      if (key && key.startsWith('log:')) {
-        const dateStr = key.substring(4); // YYYY-MM-DD
-        try {
-          const dayLogs = JSON.parse(storage.getItem(key) || '[]');
-          if (dayLogs && dayLogs.length > 0) {
-            logsByDate[dateStr] = dayLogs;
-          }
-        } catch (e) {
-          console.error("Failed to parse logs for key", key, e);
-        }
+    } catch {
+      allKeys.push(...Object.keys(storage));
+    }
+    
+    const logsToSync = {};
+    allKeys.forEach(k => {
+      if (k && k.startsWith('log:')) {
+        logsToSync[k] = storage.getItem(k);
       }
     });
-    
-    return logsByDate;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [completedMissions]);
 
-  // Helpers to push state to server KV
-  const saveProgressToServer = (password, missions, prof) => {
-    setSyncLoading(true);
     fetch('/api/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         password: password,
         progress: {
-          completedMissions: missions,
-          profile: prof
+          profile: prof,
+          stateToday: stateToday,
+          chainProgress: chainProg,
+          completionTimesToday: timesToday,
+          logs: logsToSync
         }
       })
     })
     .then(res => res.json())
     .then(data => {
       if (data.success) {
-        console.log("Progress synchronized to Cloudflare KV successfully.");
-      } else {
-        console.error("Cloudflare KV sync failed", data.error);
+        console.log("Telemetry successfully synchronized to Cloudflare KV.");
       }
     })
-    .catch(err => console.error("Error syncing progress", err))
+    .catch(err => console.error("Telemetry sync error", err))
     .finally(() => {
       setSyncLoading(false);
     });
   };
 
-  // Helper to pull state from server KV
+  // Pull Telemetry progress package from Serverless KV Store
   const fetchRemoteProgress = (password) => {
     fetch('/api/progress')
       .then(res => res.json())
@@ -211,9 +391,7 @@ export default function App() {
           const today = getTodayString();
           const yesterday = getYesterdayString();
           
-          let resolvedMissions = {};
           let resolvedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
-          
           if (remoteData.profile) {
             resolvedProfile = { ...remoteData.profile };
             const lastActive = resolvedProfile.lastActiveDate;
@@ -221,7 +399,6 @@ export default function App() {
               if (lastActive === today || lastActive === yesterday) {
                 // Streak is maintained
               } else {
-                // Streak broken (missed at least one full day)
                 resolvedProfile.streak = 0;
               }
             } else {
@@ -229,45 +406,62 @@ export default function App() {
             }
           }
           
-          // Only load remote completed missions if they were completed today
+          // Restore today's daily state
+          let resolvedState = { completedTaskIds: [], unlockedChainSteps: {} };
           if (remoteData.profile && remoteData.profile.lastActiveDate === today) {
-            if (remoteData.completedMissions) {
-              resolvedMissions = remoteData.completedMissions;
+            if (remoteData.stateToday) {
+              resolvedState = remoteData.stateToday;
             }
-          } else {
-            // Otherwise, start fresh for the new day
-            resolvedMissions = {};
           }
           
-          setCompletedMissions(resolvedMissions);
-          storage.setItem(`operator_completed_${today}`, JSON.stringify(resolvedMissions));
+          // Restore chainProgress
+          let resolvedChainProgress = {
+            'Networking Fundamentals': 0,
+            'Active Directory': 0,
+            'Web AppSec': 0,
+            'TryHackMe / Labs': 0,
+            'Interview Prep': 0,
+            'AD Attack & Detection Lab': 0
+          };
+          if (remoteData.chainProgress) {
+            resolvedChainProgress = { ...resolvedChainProgress, ...remoteData.chainProgress };
+          }
+          
+          // Restore completion times
+          let resolvedCompletionTimes = {};
+          if (remoteData.completionTimesToday) {
+            resolvedCompletionTimes = remoteData.completionTimesToday;
+          }
+          storage.setItem(`completion_times:${today}`, JSON.stringify(resolvedCompletionTimes));
+          
+          // Restore logs
+          if (remoteData.logs) {
+            Object.keys(remoteData.logs).forEach(k => {
+              storage.setItem(k, remoteData.logs[k]);
+            });
+          }
+          
+          setDailyState(resolvedState);
+          storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
+          
+          setChainProgress(resolvedChainProgress);
+          storage.setItem('chainProgress', JSON.stringify(resolvedChainProgress));
           
           setProfile(resolvedProfile);
           storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
         } else {
           // Push initial profile to Cloudflare KV if none exists yet
-          saveProgressToServer(password, completedMissions, profile);
+          saveProgressToServer(password, dailyState, profile, chainProgress, {});
         }
       })
-      .catch(err => console.error("Could not fetch remote progress", err))
+      .catch(err => console.error("Could not fetch remote telemetry", err))
       .finally(() => {
         setIsInitialLoading(false);
       });
   };
 
-  // Validation on Mount
+  // Mount logic for user token authentication
   useEffect(() => {
-    // Daily Reset Check
-    const todayDateStr = new Date().toDateString();
-    const storedDate = storage.getItem('operator_completion_date');
-    if (storedDate !== todayDateStr) {
-      setTimeout(() => {
-        setCompletedMissions({});
-      }, 0);
-      storage.setItem(`operator_completed_${getTodayString()}`, JSON.stringify({}));
-      storage.setItem('operator_completion_date', todayDateStr);
-    }
-
     const savedPasscode = storage.getItem('operator_passcode');
     if (savedPasscode) {
       fetch('/api/auth', {
@@ -290,12 +484,11 @@ export default function App() {
         console.error("Mount auth verification failed", err);
         setIsInitialLoading(false);
       });
-    } else {
-      setIsInitialLoading(false);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Login submission
+  // Login handler
   const handleLogin = (e) => {
     e.preventDefault();
     if (!passcode) return;
@@ -353,31 +546,17 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Sync profile and handle streak maintain/reset on load
+  // Clear newly unlocked step flash timer
   useEffect(() => {
-    const today = getTodayString();
-    const yesterday = getYesterdayString();
-    
-    setProfile(prev => {
-      let updatedProfile = { ...prev };
-      const lastActive = prev.lastActiveDate;
+    if (justUnlockedStepId) {
+      const timer = setTimeout(() => {
+        setJustUnlockedStepId('');
+      }, 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [justUnlockedStepId]);
 
-      if (lastActive) {
-        if (lastActive === today || lastActive === yesterday) {
-          // Maintain current streak
-        } else {
-          updatedProfile.streak = 0;
-        }
-      } else {
-        updatedProfile.streak = 0;
-      }
-
-      storage.setItem('operator_profile', JSON.stringify(updatedProfile));
-      return updatedProfile;
-    });
-  }, []);
-
-  // Compute RPG stats dynamically
+  // Compute RPG stats dynamically based on daily completedTaskIds
   const computedStats = useMemo(() => {
     let sigintBonus = 0;
     let opsBonus = 0;
@@ -386,20 +565,35 @@ export default function App() {
     let disciplineBonus = 0;
     let enduranceBonus = 0;
 
-    DAILY_MISSIONS.forEach(m => {
-      if (completedMissions[m.id]) {
-        if (m.stat === 'SIGINT') sigintBonus += m.bonus;
-        if (m.stat === 'OPS') opsBonus += m.bonus;
-        if (m.stat === 'ARSENAL') arsenalBonus += m.bonus;
-        if (m.stat === 'COMMS') commsBonus += m.bonus;
-      }
-    });
+    const completedIds = dailyState.completedTaskIds || [];
 
-    SIDE_MISSIONS.forEach(m => {
-      if (completedMissions[m.id]) {
-        if (m.stat === 'SIGINT') sigintBonus += m.bonus;
-        if (m.stat === 'DISCIPLINE') disciplineBonus += m.bonus;
-        if (m.stat === 'ENDURANCE') enduranceBonus += m.bonus;
+    completedIds.forEach(id => {
+      if (id.startsWith('chain:')) {
+        const parts = id.split(':');
+        if (parts.length === 3) {
+          const chainName = parts[1];
+          const stepIdx = parseInt(parts[2], 10);
+          const chain = CHAINS[chainName];
+          if (chain && chain[stepIdx]) {
+            const m = chain[stepIdx];
+            if (m.stat === 'SIGINT') sigintBonus += m.bonus || 0;
+            if (m.stat === 'OPS') opsBonus += m.bonus || 0;
+            if (m.stat === 'ARSENAL') arsenalBonus += m.bonus || 0;
+            if (m.stat === 'COMMS') commsBonus += m.bonus || 0;
+            if (m.stat === 'DISCIPLINE') disciplineBonus += m.bonus || 0;
+            if (m.stat === 'ENDURANCE') enduranceBonus += m.bonus || 0;
+          }
+        }
+      } else {
+        const task = FIXED_TASKS.find(t => t.id === id);
+        if (task) {
+          if (task.stat === 'SIGINT') sigintBonus += task.bonus || 0;
+          if (task.stat === 'OPS') opsBonus += task.bonus || 0;
+          if (task.stat === 'ARSENAL') arsenalBonus += task.bonus || 0;
+          if (task.stat === 'COMMS') commsBonus += task.bonus || 0;
+          if (task.stat === 'DISCIPLINE') disciplineBonus += task.bonus || 0;
+          if (task.stat === 'ENDURANCE') enduranceBonus += task.bonus || 0;
+        }
       }
     });
 
@@ -417,9 +611,9 @@ export default function App() {
       disciplineBonus,
       enduranceBonus
     };
-  }, [completedMissions]);
+  }, [dailyState.completedTaskIds]);
 
-  // Compute level from XP
+  // Level computation from XP
   const levelProgress = useMemo(() => {
     const totalXp = profile.totalXp;
     const currentLevel = Math.floor(totalXp / 200) + 1;
@@ -431,19 +625,26 @@ export default function App() {
     };
   }, [profile.totalXp]);
 
-  // Toggle mission completion
-  const handleToggleMission = (missionId, xpReward, e) => {
+  // Toggle mission completion for both type A and type B tasks
+  const handleToggleMission = (taskId, xpReward, isChainTask, chainName, stepIdx, e) => {
     const today = getTodayString();
     const yesterday = getYesterdayString();
     
-    // Add particle logic
-    if (!completedMissions[missionId]) {
+    // Copy today's daily state values
+    const stateKey = `state:${today}`;
+    let currentCompletedIds = [...dailyState.completedTaskIds];
+    let currentUnlockedSteps = { ...dailyState.unlockedChainSteps };
+    
+    const isCompleted = currentCompletedIds.includes(taskId);
+    
+    // Particles for XP gains
+    if (!isCompleted && e) {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = rect.left + rect.width / 2;
       const y = rect.top;
       
       const newParticle = {
-        id: Date.now() + Math.random(),
+        id: ++particleCounter,
         xp: xpReward,
         x: x,
         y: y
@@ -452,47 +653,98 @@ export default function App() {
       setTimeout(() => {
         setParticles(prev => prev.filter(p => p.id !== newParticle.id));
       }, 1000);
+    }
 
-      // Completion Logging
-      const m = DAILY_MISSIONS.find(x => x.id === missionId) || SIDE_MISSIONS.find(x => x.id === missionId);
-      if (m) {
-        const logKey = `log:${today}`;
-        const existingLogs = JSON.parse(storage.getItem(logKey) || '[]');
-        const logEntry = {
-          name: m.title,
-          xp: m.xp,
-          tag: m.category,
-          timestamp: new Date().toISOString()
-        };
-        existingLogs.push(logEntry);
-        storage.setItem(logKey, JSON.stringify(existingLogs));
+    // Access completion times to store timestamps
+    const timesKey = `completion_times:${today}`;
+    let completionTimes = {};
+    const savedTimes = storage.getItem(timesKey);
+    if (savedTimes) {
+      try {
+        completionTimes = JSON.parse(savedTimes);
+      } catch (err) {
+        console.error("Failed to parse completion times", err);
       }
     }
 
-    const updatedMissions = {
-      ...completedMissions,
-      [missionId]: !completedMissions[missionId]
-    };
+    let netXpChange = 0;
 
-    // Filter out uncompleted fields to save space
-    if (!updatedMissions[missionId]) {
-      delete updatedMissions[missionId];
+    if (isChainTask) {
+      if (!isCompleted) {
+        // MARK PROGRESSIVE CHAIN TASK AS COMPLETED
+        currentCompletedIds.push(taskId);
+        
+        // Unlock next step index
+        const chainLength = CHAINS[chainName].length;
+        const nextStepIdx = (stepIdx + 1) % chainLength;
+        currentUnlockedSteps[chainName] = nextStepIdx;
+        
+        completionTimes[taskId] = new Date().toISOString();
+        netXpChange = xpReward;
+        
+        // Set flash ID trigger
+        setJustUnlockedStepId(`chain:${chainName}:${nextStepIdx}`);
+      } else {
+        // UNMARK PROGRESSIVE CHAIN TASK
+        // Unmarking removes this step and any higher chain steps that have been checked
+        const stepsToRemove = [];
+        
+        currentCompletedIds = currentCompletedIds.filter(id => {
+          if (id.startsWith(`chain:${chainName}:`)) {
+            const idx = parseInt(id.split(':')[2], 10);
+            if (idx >= stepIdx) {
+              stepsToRemove.push(id);
+              return false;
+            }
+          }
+          return true;
+        });
+
+        // Calculate XP deductions
+        stepsToRemove.forEach(removedId => {
+          const idx = parseInt(removedId.split(':')[2], 10);
+          const stepTask = CHAINS[chainName][idx];
+          if (stepTask) {
+            netXpChange -= stepTask.xp;
+          }
+          delete completionTimes[removedId];
+        });
+
+        // Reset the unlocked step back to the one we just unchecked
+        currentUnlockedSteps[chainName] = stepIdx;
+      }
+    } else {
+      // FIXED TASK TOGGLING
+      if (!isCompleted) {
+        currentCompletedIds.push(taskId);
+        completionTimes[taskId] = new Date().toISOString();
+        netXpChange = xpReward;
+      } else {
+        currentCompletedIds = currentCompletedIds.filter(id => id !== taskId);
+        delete completionTimes[taskId];
+        netXpChange = -xpReward;
+      }
     }
 
-    setCompletedMissions(updatedMissions);
-    storage.setItem(`operator_completed_${today}`, JSON.stringify(updatedMissions));
+    // Save state package to storage
+    const updatedState = {
+      completedTaskIds: currentCompletedIds,
+      unlockedChainSteps: currentUnlockedSteps
+    };
+    setDailyState(updatedState);
+    storage.setItem(stateKey, JSON.stringify(updatedState));
+    storage.setItem(timesKey, JSON.stringify(completionTimes));
 
-    // Update profile total XP and streak
+    // Update level, streak and total XP
     setProfile(prev => {
-      const activeStateAfter = Object.keys(updatedMissions).length;
-      let newTotalXp = prev.totalXp + (updatedMissions[missionId] ? xpReward : -xpReward);
+      const activeStateAfter = currentCompletedIds.length;
+      let newTotalXp = prev.totalXp + netXpChange;
       if (newTotalXp < 0) newTotalXp = 0;
 
       let newStreak = prev.streak;
       let newLastActive = prev.lastActiveDate;
 
       if (activeStateAfter > 0 && (!prev.lastActiveDate || prev.lastActiveDate !== today)) {
-        // Just completed first mission today
         if (prev.lastActiveDate === yesterday) {
           newStreak = prev.streak + 1;
         } else {
@@ -500,8 +752,6 @@ export default function App() {
         }
         newLastActive = today;
       } else if (activeStateAfter === 0 && prev.lastActiveDate === today) {
-        // Unchecked the last completed mission today
-        // Revert last active to yesterday (or empty if they had no history)
         newLastActive = prev.streak > 1 ? yesterday : '';
         newStreak = Math.max(0, prev.streak - 1);
       }
@@ -517,15 +767,51 @@ export default function App() {
 
       storage.setItem('operator_profile', JSON.stringify(newProfile));
       
-      // Sync with serverless KV store
+      // Synchronize changes to Cloudflare KV
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
-        saveProgressToServer(activePasscode, updatedMissions, newProfile);
+        saveProgressToServer(activePasscode, updatedState, newProfile, chainProgress, completionTimes);
       }
 
       return newProfile;
     });
   };
+
+  // Determine active & visible chain task steps dynamically based on starting perm steps
+  const getVisibleChainSteps = (chainName) => {
+    const chain = CHAINS[chainName];
+    const startP = chainProgress[chainName] || 0;
+    const visible = [];
+    
+    let currentIdx = startP;
+    while (true) {
+      const stepId = `chain:${chainName}:${currentIdx}`;
+      const isCompleted = dailyState.completedTaskIds.includes(stepId);
+      
+      visible.push({
+        id: stepId,
+        stepIdx: currentIdx,
+        task: chain[currentIdx]
+      });
+      
+      // Render next step if this one is completed
+      if (isCompleted) {
+        currentIdx = (currentIdx + 1) % chain.length;
+        if (currentIdx === startP) break; // full loop complete
+      } else {
+        break;
+      }
+    }
+    return visible;
+  };
+
+  const DAILY_OPS_FIXED_TASKS = useMemo(() => {
+    return FIXED_TASKS.filter(t => t.category !== 'PHYSICAL' && t.category !== 'DISCIPLINE');
+  }, []);
+
+  const SIDE_OPS_FIXED_TASKS = useMemo(() => {
+    return FIXED_TASKS.filter(t => t.category === 'PHYSICAL' || t.category === 'DISCIPLINE');
+  }, []);
 
   if (isInitialLoading) {
     return (
@@ -723,109 +1009,110 @@ export default function App() {
               </div>
             </section>
 
-            {/* DAILY OPS */}
+            {/* DAILY OPS Grid */}
             <section className="daily-ops-section">
               <h2 className="panel-title">Daily Ops</h2>
               <hr className="section-divider" />
               <div className="missions-grid">
-                {(() => {
-                  const activeMissions = DAILY_MISSIONS.filter(m => !completedMissions[m.id]).slice(0, 4);
-                  if (activeMissions.length === 0) {
-                    return (
-                      <div 
-                        style={{ 
-                          padding: '24px', 
-                          border: '1px dashed var(--accent-green)', 
-                          background: 'rgba(34, 197, 94, 0.02)', 
-                          color: 'var(--accent-green)', 
-                          textAlign: 'center', 
-                          fontFamily: 'var(--font-mono)', 
-                          fontSize: '14px',
-                          gridColumn: 'span 2',
-                          letterSpacing: '0.05em'
-                        }}
-                      >
-                        [!] SYSTEM SECURED // ALL DAILY OPS COMPLETED FOR TODAY
+                {/* Render Type A - Non-physical/non-discipline fixed daily tasks */}
+                {DAILY_OPS_FIXED_TASKS.map(task => {
+                  const isCompleted = dailyState.completedTaskIds.includes(task.id);
+                  return (
+                    <div 
+                      key={task.id} 
+                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                      onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+                    >
+                      <div className="checkbox-container">
+                        <span className="checkmark-icon"></span>
                       </div>
-                    );
-                  }
-                  return activeMissions.map(m => {
-                    const isCompleted = !!completedMissions[m.id];
+                      <div className="mission-details">
+                        <span className="mission-title">{task.title}</span>
+                        <div className="mission-meta">
+                          <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                          <span className="xp-reward">+{task.xp} XP</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Render Type B - Active and Completed Progressive Chain tasks */}
+                {Object.keys(CHAINS).map(chainName => {
+                  const visibleSteps = getVisibleChainSteps(chainName);
+                  return visibleSteps.map(({ id, stepIdx, task }) => {
+                    const isCompleted = dailyState.completedTaskIds.includes(id);
+                    const isJustUnlocked = justUnlockedStepId === id;
                     return (
                       <div 
-                        key={m.id} 
-                        className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                        onClick={(e) => handleToggleMission(m.id, m.xp, e)}
+                        key={id} 
+                        className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                        onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
                       >
                         <div className="checkbox-container">
                           <span className="checkmark-icon"></span>
                         </div>
                         <div className="mission-details">
-                          <span className="mission-title">{m.title}</span>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                            <span className="mission-title">{task.title}</span>
+                            {isJustUnlocked && (
+                              <span style={{ 
+                                fontSize: '10px', 
+                                fontFamily: 'var(--font-mono)', 
+                                color: 'var(--accent-green)', 
+                                border: '1px solid var(--accent-green)', 
+                                padding: '0 4px', 
+                                marginLeft: '8px',
+                                textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                UNLOCKED
+                              </span>
+                            )}
+                          </div>
                           <div className="mission-meta">
-                            <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
-                            <span className="xp-reward">+{m.xp} XP</span>
+                            <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                            <span className="xp-reward">+{task.xp} XP</span>
                           </div>
                         </div>
                       </div>
                     );
                   });
-                })()}
+                })}
               </div>
             </section>
 
-            {/* SIDE OPS */}
+            {/* SIDE OPS section */}
             <section className="side-ops-section">
               <h2 className="panel-title">Side Ops</h2>
               <hr className="section-divider" />
               <div className="missions-grid">
-                {(() => {
-                  const activeMissions = SIDE_MISSIONS.filter(m => !completedMissions[m.id]).slice(0, 4);
-                  if (activeMissions.length === 0) {
-                    return (
-                      <div 
-                        style={{ 
-                          padding: '24px', 
-                          border: '1px dashed var(--accent-green)', 
-                          background: 'rgba(34, 197, 94, 0.02)', 
-                          color: 'var(--accent-green)', 
-                          textAlign: 'center', 
-                          fontFamily: 'var(--font-mono)', 
-                          fontSize: '14px',
-                          gridColumn: 'span 2',
-                          letterSpacing: '0.05em'
-                        }}
-                      >
-                        [!] DISCIPLINE MAINTAINED // ALL SIDE OPS COMPLETED FOR TODAY
+                {/* Render Type A - Physical and Discipline fixed daily tasks */}
+                {SIDE_OPS_FIXED_TASKS.map(task => {
+                  const isCompleted = dailyState.completedTaskIds.includes(task.id);
+                  return (
+                    <div 
+                      key={task.id} 
+                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                      onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+                    >
+                      <div className="checkbox-container">
+                        <span className="checkmark-icon"></span>
                       </div>
-                    );
-                  }
-                  return activeMissions.map(m => {
-                    const isCompleted = !!completedMissions[m.id];
-                    return (
-                      <div 
-                        key={m.id} 
-                        className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                        onClick={(e) => handleToggleMission(m.id, m.xp, e)}
-                      >
-                        <div className="checkbox-container">
-                          <span className="checkmark-icon"></span>
-                        </div>
-                        <div className="mission-details">
-                          <span className="mission-title">{m.title}</span>
-                          <div className="mission-meta">
-                            <span className={`badge badge-${m.category.toLowerCase()}`}>{m.category}</span>
-                            <span className="xp-reward">+{m.xp} XP</span>
-                          </div>
+                      <div className="mission-details">
+                        <span className="mission-title">{task.title}</span>
+                        <div className="mission-meta">
+                          <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                          <span className="xp-reward">+{task.xp} XP</span>
                         </div>
                       </div>
-                    );
-                  });
-                })()}
+                    </div>
+                  );
+                })}
               </div>
             </section>
 
-            {/* MISSION LOGS */}
+            {/* COLLAPSIBLE MISSION LOGS */}
             <section className="mission-logs-section">
               <div 
                 className="panel-title-clickable" 
@@ -855,153 +1142,287 @@ export default function App() {
               
               {isLogsExpanded && (
                 <div className="logs-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  {Object.keys(missionLogs).length === 0 ? (
-                    <div 
-                      className="empty-logs-msg" 
-                      style={{ 
-                        padding: '16px', 
-                        border: '1px dashed var(--border-color)', 
-                        color: 'var(--text-muted)', 
-                        fontFamily: 'var(--font-mono)', 
-                        fontSize: '13px', 
-                        textAlign: 'center',
-                        background: 'rgba(0, 0, 0, 0.2)'
-                      }}
-                    >
-                      NO SYSTEM LOGS RECORDED // SYSTEM IDLE
-                    </div>
-                  ) : (
-                    Object.keys(missionLogs)
-                      .sort((a, b) => b.localeCompare(a))
-                      .map(date => {
-                        const dayLogs = missionLogs[date];
-                        const totalXp = dayLogs.reduce((sum, log) => sum + (log.xp || 0), 0);
+                  
+                  {/* Date picker lookup */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>
+                      LOOKUP DATE:
+                    </span>
+                    <input 
+                      type="date" 
+                      className="dark-date-picker" 
+                      value={lookupDate} 
+                      onChange={(e) => setLookupDate(e.target.value)}
+                    />
+                  </div>
+
+                  {(() => {
+                    const savedLogsRaw = storage.getItem(`log:${lookupDate}`);
+                    if (!savedLogsRaw) {
+                      return (
+                        <div 
+                          className="empty-logs-msg" 
+                          style={{ 
+                            padding: '24px', 
+                            border: '1px dashed var(--border-color)', 
+                            color: 'var(--text-muted)', 
+                            fontFamily: 'var(--font-mono)', 
+                            fontSize: '13px', 
+                            textAlign: 'center',
+                            background: 'rgba(0, 0, 0, 0.2)'
+                          }}
+                        >
+                          NO DATA FOR THIS DATE
+                        </div>
+                      );
+                    }
+
+                    try {
+                      const dayLogs = JSON.parse(savedLogsRaw);
+                      if (!dayLogs || dayLogs.length === 0) {
                         return (
                           <div 
-                            key={date} 
-                            className="day-logs-card" 
+                            className="empty-logs-msg" 
                             style={{ 
-                              background: 'var(--bg-card)', 
-                              border: '1px solid var(--border-color)', 
-                              padding: '16px',
-                              position: 'relative'
+                              padding: '24px', 
+                              border: '1px dashed var(--border-color)', 
+                              color: 'var(--text-muted)', 
+                              fontFamily: 'var(--font-mono)', 
+                              fontSize: '13px', 
+                              textAlign: 'center',
+                              background: 'rgba(0, 0, 0, 0.2)'
                             }}
                           >
-                            <div 
-                              className="day-logs-header" 
-                              style={{ 
-                                display: 'flex', 
-                                justifyContent: 'space-between', 
-                                alignItems: 'center', 
-                                marginBottom: '12px', 
-                                borderBottom: '1px dashed var(--border-color)', 
-                                paddingBottom: '8px' 
-                              }}
-                            >
-                              <span 
-                                className="day-date" 
-                                style={{ 
-                                  fontFamily: 'var(--font-mono)', 
-                                  fontSize: '14px', 
-                                  color: 'var(--accent-amber)', 
-                                  fontWeight: 'bold' 
-                                }}
-                              >
-                                📅 LOG_DATE: {date}
-                              </span>
-                              <span 
-                                className="day-total-xp" 
-                                style={{ 
-                                  fontFamily: 'var(--font-mono)', 
-                                  fontSize: '13px', 
-                                  color: 'var(--accent-green)', 
-                                  fontWeight: 'bold' 
-                                }}
-                              >
-                                +{totalXp} XP EARNED
-                              </span>
-                            </div>
-                            <div 
-                              className="day-logs-list" 
-                              style={{ 
-                                display: 'flex', 
-                                flexDirection: 'column', 
-                                gap: '8px' 
-                              }}
-                            >
-                              {dayLogs.map((log, idx) => {
-                                const logTime = new Date(log.timestamp);
-                                const formattedTime = `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`;
-                                return (
-                                  <div 
-                                    key={idx} 
-                                    className="log-entry-row" 
-                                    style={{ 
-                                      display: 'flex', 
-                                      justifyContent: 'space-between', 
-                                      alignItems: 'center', 
-                                      padding: '6px 10px', 
-                                      background: 'rgba(255, 255, 255, 0.01)', 
-                                      borderLeft: '3px solid var(--accent-amber)',
-                                      border: '1px solid rgba(255, 255, 255, 0.02)',
-                                      borderLeftColor: 'var(--accent-amber)'
-                                    }}
-                                  >
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                                      <span 
-                                        className={`badge badge-${(log.tag || '').toLowerCase()}`} 
-                                        style={{ 
-                                          fontSize: '9px', 
-                                          padding: '1px 5px',
-                                          whiteSpace: 'nowrap'
-                                        }}
-                                      >
-                                        {log.tag}
-                                      </span>
-                                      <span 
-                                        className="log-entry-name" 
-                                        style={{ 
-                                          fontSize: '13px', 
-                                          color: 'var(--text-main)',
-                                          whiteSpace: 'nowrap',
-                                          overflow: 'hidden',
-                                          textOverflow: 'ellipsis'
-                                        }}
-                                      >
-                                        {log.name}
-                                      </span>
-                                    </div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                                      <span 
-                                        className="log-entry-xp" 
-                                        style={{ 
-                                          color: 'var(--accent-amber)', 
-                                          fontFamily: 'var(--font-mono)', 
-                                          fontSize: '12px', 
-                                          fontWeight: 'bold' 
-                                        }}
-                                      >
-                                        +{log.xp} XP
-                                      </span>
-                                      <span 
-                                        className="log-entry-time" 
-                                        style={{ 
-                                          color: 'var(--text-muted)', 
-                                          fontFamily: 'var(--font-mono)', 
-                                          fontSize: '11px' 
-                                        }}
-                                      >
-                                        [{formattedTime}]
-                                      </span>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
+                            NO DATA FOR THIS DATE
                           </div>
                         );
-                      })
-                  )}
+                      }
+
+                      const completedLogs = dayLogs.filter(l => l.type === 'completed');
+                      const missedLogs = dayLogs.filter(l => l.type === 'missed');
+                      const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0);
+
+                      return (
+                        <div 
+                          className="day-logs-card" 
+                          style={{ 
+                            background: 'var(--bg-card)', 
+                            border: '1px solid var(--border-color)', 
+                            padding: '16px',
+                            position: 'relative'
+                          }}
+                        >
+                          <div 
+                            className="day-logs-header" 
+                            style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              marginBottom: '12px', 
+                              borderBottom: '1px dashed var(--border-color)', 
+                              paddingBottom: '8px' 
+                            }}
+                          >
+                            <span 
+                              className="day-date" 
+                              style={{ 
+                                fontFamily: 'var(--font-mono)', 
+                                fontSize: '14px', 
+                                color: 'var(--accent-amber)', 
+                                fontWeight: 'bold' 
+                              }}
+                            >
+                              📅 LOG_DATE: {lookupDate}
+                            </span>
+                            <span 
+                              className="day-total-xp" 
+                              style={{ 
+                                fontFamily: 'var(--font-mono)', 
+                                fontSize: '13px', 
+                                color: 'var(--accent-green)', 
+                                fontWeight: 'bold' 
+                              }}
+                            >
+                              +{totalXp} XP EARNED
+                            </span>
+                          </div>
+
+                          <div 
+                            className="day-logs-list" 
+                            style={{ 
+                              display: 'flex', 
+                              flexDirection: 'column', 
+                              gap: '8px',
+                              marginBottom: '16px'
+                            }}
+                          >
+                            {/* Render Completed Tasks */}
+                            {completedLogs.map((log, idx) => {
+                              const logTime = new Date(log.completedAt);
+                              const formattedTime = !isNaN(logTime.getTime()) 
+                                ? `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`
+                                : '--:--';
+                              return (
+                                <div 
+                                  key={`comp-${idx}`} 
+                                  className="log-entry-row" 
+                                  style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center', 
+                                    padding: '6px 10px', 
+                                    background: 'rgba(34, 197, 94, 0.02)', 
+                                    border: '1px solid rgba(34, 197, 94, 0.1)',
+                                    borderLeft: '3px solid var(--accent-green)'
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                                    <span 
+                                      className={`badge badge-${(log.tag || '').toLowerCase()}`} 
+                                      style={{ 
+                                        fontSize: '9px', 
+                                        padding: '1px 5px',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      {log.tag}
+                                    </span>
+                                    <span 
+                                      className="log-entry-name" 
+                                      style={{ 
+                                        fontSize: '13px', 
+                                        color: 'var(--text-main)',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis'
+                                      }}
+                                    >
+                                      {log.taskName}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                    <span 
+                                      className="log-entry-xp" 
+                                      style={{ 
+                                        color: 'var(--accent-green)', 
+                                        fontFamily: 'var(--font-mono)', 
+                                        fontSize: '12px', 
+                                        fontWeight: 'bold' 
+                                      }}
+                                    >
+                                      +{log.xp} XP
+                                    </span>
+                                    <span 
+                                      className="log-entry-time" 
+                                      style={{ 
+                                        color: 'var(--text-muted)', 
+                                        fontFamily: 'var(--font-mono)', 
+                                        fontSize: '11px' 
+                                      }}
+                                    >
+                                      [{formattedTime}]
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+
+                            {/* Render Missed Fixed Tasks */}
+                            {missedLogs.map((log, idx) => {
+                              return (
+                                <div 
+                                  key={`missed-${idx}`} 
+                                  className="log-entry-row" 
+                                  style={{ 
+                                    display: 'flex', 
+                                    justifyContent: 'space-between', 
+                                    alignItems: 'center', 
+                                    padding: '6px 10px', 
+                                    background: 'rgba(255, 111, 97, 0.02)', 
+                                    border: '1px solid rgba(255, 111, 97, 0.05)',
+                                    borderLeft: '3px solid var(--accent-coral)',
+                                    opacity: 0.6
+                                  }}
+                                >
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                                    <span 
+                                      className={`badge badge-${(log.tag || '').toLowerCase()}`} 
+                                      style={{ 
+                                        fontSize: '9px', 
+                                        padding: '1px 5px',
+                                        whiteSpace: 'nowrap'
+                                      }}
+                                    >
+                                      {log.tag}
+                                    </span>
+                                    <span 
+                                      className="log-entry-name" 
+                                      style={{ 
+                                        fontSize: '13px', 
+                                        color: 'var(--text-muted)',
+                                        whiteSpace: 'nowrap',
+                                        overflow: 'hidden',
+                                        textOverflow: 'ellipsis'
+                                      }}
+                                    >
+                                      {log.taskName}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                                    <span 
+                                      className="log-entry-xp" 
+                                      style={{ 
+                                        color: 'var(--accent-coral)', 
+                                        fontFamily: 'var(--font-mono)', 
+                                        fontSize: '11px', 
+                                        fontWeight: 'bold' 
+                                      }}
+                                    >
+                                      MISSED
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Stats line */}
+                          <div 
+                            style={{ 
+                              fontFamily: 'var(--font-mono)', 
+                              fontSize: '13px', 
+                              color: 'var(--text-muted)',
+                              textAlign: 'right',
+                              borderTop: '1px dashed var(--border-color)',
+                              paddingTop: '8px'
+                            }}
+                          >
+                            STATS: <span style={{ color: 'var(--accent-green)' }}>{completedLogs.length} COMPLETED</span> / <span style={{ color: 'var(--accent-coral)' }}>{missedLogs.length} MISSED</span> / <span style={{ color: 'var(--accent-amber)' }}>{totalXp} XP EARNED</span>
+                          </div>
+
+                        </div>
+                      );
+                    } catch (err) {
+                      console.error("Failed to parse day logs", err);
+                      return (
+                        <div 
+                          className="empty-logs-msg" 
+                          style={{ 
+                            padding: '24px', 
+                            border: '1px dashed var(--border-color)', 
+                            color: 'var(--text-muted)', 
+                            fontFamily: 'var(--font-mono)', 
+                            fontSize: '13px', 
+                            textAlign: 'center',
+                            background: 'rgba(0, 0, 0, 0.2)'
+                          }}
+                        >
+                          CORRUPT LOG DATA FOR THIS DATE
+                        </div>
+                      );
+                    }
+                  })()}
+
                 </div>
               )}
             </section>
@@ -1076,7 +1497,7 @@ export default function App() {
                       <div className="stat-label-group">
                         <span className="stat-icon">⚔️</span>
                         <span className="stat-name">ARSENAL</span>
-                        <span className="stat-desc">— 3 active projects · AD Lab · TI Engine · Cloud Scanner</span>
+                        <span className="stat-desc">— Active projects</span>
                       </div>
                       <span className="stat-value">{computedStats.arsenal}%</span>
                     </div>
