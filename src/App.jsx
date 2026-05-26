@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import './index.css';
+import { fetchFlavorRotation, fetchDailyDebrief } from './services/aiService';
 
 const storage = typeof window !== 'undefined' && window.storage ? window.storage : localStorage;
 
@@ -189,12 +190,14 @@ const initializeTelemetry = () => {
     // Process yesterday's fixed tasks (both completed and missed)
     FIXED_TASKS.forEach(task => {
       const isCompleted = yesterdayCompletedTaskIds.includes(task.id);
+      const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
       logEntries.push({
         taskName: task.title,
         tag: task.category,
         xp: task.xp,
         completedAt: isCompleted ? (yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`) : null,
-        type: isCompleted ? 'completed' : 'missed'
+        type: isCompleted ? 'completed' : 'missed',
+        ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
       });
     });
 
@@ -225,15 +228,13 @@ const initializeTelemetry = () => {
 
     // Advance permanent chainProgress for steps completed yesterday
     Object.keys(CHAINS).forEach(chainName => {
-      const chain = CHAINS[chainName];
       let currentP = chainProgress[chainName] || 0;
       let nextP = currentP;
       
       while (true) {
         const stepId = `chain:${chainName}:${nextP}`;
         if (yesterdayCompletedTaskIds.includes(stepId)) {
-          nextP = (nextP + 1) % chain.length;
-          if (nextP === currentP) break; // completed entire chain loop
+          nextP = nextP + 1; // ONLY moves forward, never resets/wraps
         } else {
           break;
         }
@@ -335,6 +336,76 @@ export default function App() {
   // Active schedule index
   const [activeBlockIndex, setActiveBlockIndex] = useState(-1);
 
+  // Daily Flavor Rotation (AI-Powered) state
+  const [flavors, setFlavors] = useState({});
+
+  // Missed task penalty banner state
+  const [showPenaltyBanner, setShowPenaltyBanner] = useState(() => {
+    const today = getTodayString();
+    const dismissed = storage.getItem(`dismissed_banner:${today}`);
+    if (dismissed === 'true') return false;
+
+    const yesterday = getYesterdayString();
+    const yesterdayLogsRaw = storage.getItem(`log:${yesterday}`);
+    if (yesterdayLogsRaw) {
+      try {
+        const logs = JSON.parse(yesterdayLogsRaw);
+        return logs.some(log => log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0);
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  });
+
+  // End of Day AI Debrief states
+  const [isDayClosed, setIsDayClosed] = useState(() => {
+    const today = getTodayString();
+    return storage.getItem(`dayClosed:${today}`) === 'true';
+  });
+  const [showDebriefModal, setShowDebriefModal] = useState(false);
+  const [debriefText, setDebriefText] = useState('');
+  const [debriefLoading, setDebriefLoading] = useState(false);
+  const [debriefError, setDebriefError] = useState(false);
+  const [isDebriefExpanded, setIsDebriefExpanded] = useState(false);
+
+  // Reset collapsible debrief when lookup date changes
+  useEffect(() => {
+    setIsDebriefExpanded(false);
+  }, [lookupDate]);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    const today = getTodayString();
+    const stored = storage.getItem(`flavor:${today}`);
+    if (stored) {
+      try {
+        setFlavors(JSON.parse(stored));
+        return;
+      } catch (e) {
+        console.error("Failed to parse stored flavors", e);
+      }
+    }
+
+    const allTasks = [
+      ...FIXED_TASKS.map(t => ({ id: t.id, name: t.title, tag: t.category })),
+      ...Object.keys(CHAINS).flatMap(chainName => 
+        CHAINS[chainName].map((task, stepIdx) => ({
+          id: `chain:${chainName}:${stepIdx}`,
+          name: task.title,
+          tag: task.category
+        }))
+      )
+    ];
+
+    fetchFlavorRotation(allTasks).then(result => {
+      if (result !== null) {
+        storage.setItem(`flavor:${today}`, JSON.stringify(result));
+        setFlavors(result);
+      }
+    });
+  }, [isAuthenticated]);
+
   // Push telemetry packages to Serverless KV Store
   const saveProgressToServer = (password, stateToday, prof, chainProg, timesToday) => {
     setSyncLoading(true);
@@ -349,9 +420,21 @@ export default function App() {
     }
     
     const logsToSync = {};
+    const debriefsToSync = {};
+    const dayClosedToSync = {};
+    const flavorsToSync = {};
+
     allKeys.forEach(k => {
-      if (k && k.startsWith('log:')) {
-        logsToSync[k] = storage.getItem(k);
+      if (k) {
+        if (k.startsWith('log:')) {
+          logsToSync[k] = storage.getItem(k);
+        } else if (k.startsWith('debrief:')) {
+          debriefsToSync[k] = storage.getItem(k);
+        } else if (k.startsWith('dayClosed:')) {
+          dayClosedToSync[k] = storage.getItem(k);
+        } else if (k.startsWith('flavor:')) {
+          flavorsToSync[k] = storage.getItem(k);
+        }
       }
     });
 
@@ -365,7 +448,10 @@ export default function App() {
           stateToday: stateToday,
           chainProgress: chainProg,
           completionTimesToday: timesToday,
-          logs: logsToSync
+          logs: logsToSync,
+          debriefs: debriefsToSync,
+          dayClosed: dayClosedToSync,
+          flavors: flavorsToSync
         }
       })
     })
@@ -440,6 +526,27 @@ export default function App() {
               storage.setItem(k, remoteData.logs[k]);
             });
           }
+
+          // Restore debriefs
+          if (remoteData.debriefs) {
+            Object.keys(remoteData.debriefs).forEach(k => {
+              storage.setItem(k, remoteData.debriefs[k]);
+            });
+          }
+
+          // Restore dayClosed
+          if (remoteData.dayClosed) {
+            Object.keys(remoteData.dayClosed).forEach(k => {
+              storage.setItem(k, remoteData.dayClosed[k]);
+            });
+          }
+
+          // Restore flavors
+          if (remoteData.flavors) {
+            Object.keys(remoteData.flavors).forEach(k => {
+              storage.setItem(k, remoteData.flavors[k]);
+            });
+          }
           
           setDailyState(resolvedState);
           storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
@@ -449,6 +556,17 @@ export default function App() {
           
           setProfile(resolvedProfile);
           storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
+
+          // Dynamically update closed and flavor states based on restored package
+          const todayClosed = storage.getItem(`dayClosed:${today}`) === 'true';
+          setIsDayClosed(todayClosed);
+
+          const todayFlavorsRaw = storage.getItem(`flavor:${today}`);
+          if (todayFlavorsRaw) {
+            try {
+              setFlavors(JSON.parse(todayFlavorsRaw));
+            } catch {}
+          }
         } else {
           // Push initial profile to Cloudflare KV if none exists yet
           saveProgressToServer(password, dailyState, profile, chainProgress, {});
@@ -487,6 +605,143 @@ export default function App() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Handle End Shift and AI Debrief fetching
+  const handleEndShift = async () => {
+    const today = getTodayString();
+    
+    if (isDayClosed) {
+      // Reopen stored debrief text
+      const stored = storage.getItem(`debrief:${today}`);
+      setDebriefText(stored || 'NO DEBRIEF DATA LOCATED.');
+      setDebriefError(false);
+      setDebriefLoading(false);
+      setShowDebriefModal(true);
+      return;
+    }
+
+    // Collect today's performance state
+    const completedTasks = [];
+    const missedFixedTasks = [];
+    let totalXpEarned = 0;
+
+    dailyState.completedTaskIds.forEach(id => {
+      if (id.startsWith('chain:')) {
+        const parts = id.split(':');
+        if (parts.length === 3) {
+          const chainName = parts[1];
+          const stepIdx = parseInt(parts[2], 10);
+          const chain = CHAINS[chainName];
+          if (chain && chain[stepIdx]) {
+            const task = chain[stepIdx];
+            completedTasks.push(task.title);
+            totalXpEarned += task.xp;
+          }
+        }
+      } else {
+        const task = FIXED_TASKS.find(t => t.id === id);
+        if (task) {
+          completedTasks.push(task.title);
+          totalXpEarned += task.xp;
+        }
+      }
+    });
+
+    FIXED_TASKS.forEach(task => {
+      const isCompleted = dailyState.completedTaskIds.includes(task.id);
+      if (!isCompleted) {
+        missedFixedTasks.push(task.title);
+        const isMissedPenalized = ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+        if (isMissedPenalized) {
+          totalXpEarned -= Math.floor(task.xp * 0.5);
+        }
+      }
+    });
+
+    const chainPositions = {};
+    Object.keys(CHAINS).forEach(chainName => {
+      chainPositions[chainName] = chainProgress[chainName];
+    });
+
+    const payload = {
+      completed: completedTasks,
+      missed: missedFixedTasks,
+      xpEarned: totalXpEarned,
+      chainProgress
+    };
+
+    try {
+      setDebriefText('> CONTACTING COMMANDER...');
+      setDebriefLoading(true);
+      setDebriefError(false);
+      setShowDebriefModal(true);
+
+      const debriefResult = await fetchDailyDebrief(payload);
+      setDebriefText(debriefResult);
+    } catch (err) {
+      console.error(err);
+      setDebriefError(true);
+    } finally {
+      setDebriefLoading(false);
+    }
+  };
+
+  const closeDebriefModal = () => {
+    setShowDebriefModal(false);
+    if (!isDayClosed) {
+      const today = getTodayString();
+      const logEntries = [];
+
+      // Process today's fixed tasks (both completed and missed)
+      FIXED_TASKS.forEach(task => {
+        const isCompleted = dailyState.completedTaskIds.includes(task.id);
+        const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+        
+        logEntries.push({
+          taskName: task.title,
+          tag: task.category,
+          xp: task.xp,
+          completedAt: isCompleted ? (storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`))[task.id] || new Date().toISOString() : new Date().toISOString()) : null,
+          type: isCompleted ? 'completed' : 'missed',
+          ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
+        });
+      });
+
+      // Process today's completed chain tasks
+      dailyState.completedTaskIds.forEach(id => {
+        if (id.startsWith('chain:')) {
+          const parts = id.split(':');
+          if (parts.length === 3) {
+            const chainName = parts[1];
+            const stepIdx = parseInt(parts[2], 10);
+            const chain = CHAINS[chainName];
+            if (chain && chain[stepIdx]) {
+              const stepTask = chain[stepIdx];
+              logEntries.push({
+                taskName: stepTask.title,
+                tag: stepTask.category,
+                xp: stepTask.xp,
+                completedAt: storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`))[id] || new Date().toISOString() : new Date().toISOString(),
+                type: 'completed'
+              });
+            }
+          }
+        }
+      });
+
+      // Save today's log compile
+      storage.setItem(`log:${today}`, JSON.stringify(logEntries));
+      storage.setItem(`debrief:${today}`, debriefText);
+      storage.setItem(`dayClosed:${today}`, 'true');
+      setIsDayClosed(true);
+
+      // Also trigger a KV sync to backup today's new logs and closure status
+      const activePasscode = passcode || storage.getItem('operator_passcode');
+      if (activePasscode) {
+        saveProgressToServer(activePasscode, dailyState, profile, chainProgress, storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`)) : {});
+      }
+    }
+  };
 
   // Login handler
   const handleLogin = (e) => {
@@ -627,6 +882,7 @@ export default function App() {
 
   // Toggle mission completion for both type A and type B tasks
   const handleToggleMission = (taskId, xpReward, isChainTask, chainName, stepIdx, e) => {
+    if (isDayClosed) return;
     const today = getTodayString();
     const yesterday = getYesterdayString();
     
@@ -676,14 +932,14 @@ export default function App() {
         
         // Unlock next step index
         const chainLength = CHAINS[chainName].length;
-        const nextStepIdx = (stepIdx + 1) % chainLength;
-        currentUnlockedSteps[chainName] = nextStepIdx;
+        const nextStepIdx = stepIdx + 1;
+        if (nextStepIdx < chainLength) {
+          currentUnlockedSteps[chainName] = nextStepIdx;
+          setJustUnlockedStepId(`chain:${chainName}:${nextStepIdx}`);
+        }
         
         completionTimes[taskId] = new Date().toISOString();
         netXpChange = xpReward;
-        
-        // Set flash ID trigger
-        setJustUnlockedStepId(`chain:${chainName}:${nextStepIdx}`);
       } else {
         // UNMARK PROGRESSIVE CHAIN TASK
         // Unmarking removes this step and any higher chain steps that have been checked
@@ -785,6 +1041,7 @@ export default function App() {
     
     let currentIdx = startP;
     while (true) {
+      if (currentIdx >= chain.length) break;
       const stepId = `chain:${chainName}:${currentIdx}`;
       const isCompleted = dailyState.completedTaskIds.includes(stepId);
       
@@ -796,8 +1053,7 @@ export default function App() {
       
       // Render next step if this one is completed
       if (isCompleted) {
-        currentIdx = (currentIdx + 1) % chain.length;
-        if (currentIdx === startP) break; // full loop complete
+        currentIdx = currentIdx + 1; // NO % chain.length!
       } else {
         break;
       }
@@ -898,6 +1154,33 @@ export default function App() {
             </span>
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            <button 
+              onClick={handleEndShift}
+              className="end-shift-btn"
+              style={{
+                background: 'var(--bg-terminal)',
+                border: '1px solid var(--accent-amber)',
+                color: 'var(--accent-amber)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                padding: '4px 12px',
+                cursor: 'pointer',
+                boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                transition: 'all 0.2s',
+                textTransform: 'uppercase'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--accent-amber)';
+                e.currentTarget.style.color = 'var(--bg-terminal)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--bg-terminal)';
+                e.currentTarget.style.color = 'var(--accent-amber)';
+              }}
+            >
+              {isDayClosed ? '[ VIEW DEBRIEF ]' : '[ END SHIFT ]'}
+            </button>
             <span className="streak-counter">
               🔥 STREAK: {profile.streak} {profile.streak === 1 ? 'DAY' : 'DAYS'}
             </span>
@@ -915,6 +1198,67 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Missed Task Penalty Warning Banner */}
+      {showPenaltyBanner && (() => {
+        const yesterday = getYesterdayString();
+        const yesterdayLogsRaw = storage.getItem(`log:${yesterday}`);
+        let missedPenalizedCount = 0;
+        let totalPenalty = 0;
+        if (yesterdayLogsRaw) {
+          try {
+            const logs = JSON.parse(yesterdayLogsRaw);
+            logs.forEach(log => {
+              if (log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0) {
+                missedPenalizedCount++;
+                totalPenalty += Math.abs(log.xpPenalty);
+              }
+            });
+          } catch {}
+        }
+
+        if (missedPenalizedCount === 0) return null;
+
+        return (
+          <div style={{
+            background: 'rgba(255, 111, 97, 0.1)',
+            border: '1px solid var(--accent-coral)',
+            color: 'var(--accent-coral)',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '14px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            boxShadow: '0 0 10px rgba(255, 111, 97, 0.15)',
+            textShadow: '0 0 4px rgba(255, 111, 97, 0.4)'
+          }}>
+            <span>
+              ⚠ YESTERDAY YOU WENT DARK ON {missedPenalizedCount} MISSIONS — {totalPenalty} XP LOST
+            </span>
+            <button 
+              onClick={() => {
+                const today = getTodayString();
+                storage.setItem(`dismissed_banner:${today}`, 'true');
+                setShowPenaltyBanner(false);
+              }}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'var(--accent-coral)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-mono)',
+                fontWeight: 'bold',
+                fontSize: '16px',
+                marginLeft: '12px'
+              }}
+            >
+              [X]
+            </button>
+          </div>
+        );
+      })()}
 
       {/* NAVIGATION TABS */}
       <nav className="nav-tabs">
@@ -1017,6 +1361,8 @@ export default function App() {
                 {/* Render Type A - Non-physical/non-discipline fixed daily tasks */}
                 {DAILY_OPS_FIXED_TASKS.map(task => {
                   const isCompleted = dailyState.completedTaskIds.includes(task.id);
+                  const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+                  const briefing = flavors[task.id]?.briefing;
                   return (
                     <div 
                       key={task.id} 
@@ -1027,7 +1373,18 @@ export default function App() {
                         <span className="checkmark-icon"></span>
                       </div>
                       <div className="mission-details">
-                        <span className="mission-title">{task.title}</span>
+                        <span className="mission-title">{displayTitle}</span>
+                        {briefing && (
+                          <span className="mission-briefing" style={{ 
+                            display: 'block', 
+                            fontSize: '11px', 
+                            color: 'var(--text-muted)', 
+                            marginTop: '2px', 
+                            fontFamily: 'var(--font-mono)' 
+                          }}>
+                            {briefing}
+                          </span>
+                        )}
                         <div className="mission-meta">
                           <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
                           <span className="xp-reward">+{task.xp} XP</span>
@@ -1043,6 +1400,8 @@ export default function App() {
                   return visibleSteps.map(({ id, stepIdx, task }) => {
                     const isCompleted = dailyState.completedTaskIds.includes(id);
                     const isJustUnlocked = justUnlockedStepId === id;
+                    const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                    const briefing = flavors[id]?.briefing;
                     return (
                       <div 
                         key={id} 
@@ -1054,7 +1413,7 @@ export default function App() {
                         </div>
                         <div className="mission-details">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                            <span className="mission-title">{task.title}</span>
+                            <span className="mission-title">{displayTitle}</span>
                             {isJustUnlocked && (
                               <span style={{ 
                                 fontSize: '10px', 
@@ -1070,6 +1429,17 @@ export default function App() {
                               </span>
                             )}
                           </div>
+                          {briefing && (
+                            <span className="mission-briefing" style={{ 
+                              display: 'block', 
+                              fontSize: '11px', 
+                              color: 'var(--text-muted)', 
+                              marginTop: '2px', 
+                              fontFamily: 'var(--font-mono)' 
+                            }}>
+                              {briefing}
+                            </span>
+                          )}
                           <div className="mission-meta">
                             <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
                             <span className="xp-reward">+{task.xp} XP</span>
@@ -1090,6 +1460,8 @@ export default function App() {
                 {/* Render Type A - Physical and Discipline fixed daily tasks */}
                 {SIDE_OPS_FIXED_TASKS.map(task => {
                   const isCompleted = dailyState.completedTaskIds.includes(task.id);
+                  const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+                  const briefing = flavors[task.id]?.briefing;
                   return (
                     <div 
                       key={task.id} 
@@ -1100,7 +1472,18 @@ export default function App() {
                         <span className="checkmark-icon"></span>
                       </div>
                       <div className="mission-details">
-                        <span className="mission-title">{task.title}</span>
+                        <span className="mission-title">{displayTitle}</span>
+                        {briefing && (
+                          <span className="mission-briefing" style={{ 
+                            display: 'block', 
+                            fontSize: '11px', 
+                            color: 'var(--text-muted)', 
+                            marginTop: '2px', 
+                            fontFamily: 'var(--font-mono)' 
+                          }}>
+                            {briefing}
+                          </span>
+                        )}
                         <div className="mission-meta">
                           <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
                           <span className="xp-reward">+{task.xp} XP</span>
@@ -1200,7 +1583,10 @@ export default function App() {
 
                       const completedLogs = dayLogs.filter(l => l.type === 'completed');
                       const missedLogs = dayLogs.filter(l => l.type === 'missed');
-                      const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0);
+                      const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
+                                      missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
+
+                      const storedDebrief = storage.getItem(`debrief:${lookupDate}`);
 
                       return (
                         <div 
@@ -1378,13 +1764,53 @@ export default function App() {
                                         fontWeight: 'bold' 
                                       }}
                                     >
-                                      MISSED
+                                      MISSED {log.xpPenalty ? `(${log.xpPenalty} XP)` : ''}
                                     </span>
                                   </div>
                                 </div>
                               );
                             })}
                           </div>
+
+                          {storedDebrief && (
+                            <div className="debrief-collapsible" style={{ marginBottom: '16px' }}>
+                              <button 
+                                onClick={() => setIsDebriefExpanded(!isDebriefExpanded)}
+                                style={{
+                                  background: 'none',
+                                  border: 'none',
+                                  color: 'var(--accent-amber)',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '12px',
+                                  cursor: 'pointer',
+                                  padding: '4px 0',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  width: '100%',
+                                  textAlign: 'left'
+                                }}
+                              >
+                                <span>{isDebriefExpanded ? '▼' : '►'} COMMANDER'S DEBRIEF</span>
+                              </button>
+                              
+                              {isDebriefExpanded && (
+                                <div style={{
+                                  background: 'rgba(245, 166, 35, 0.02)',
+                                  borderLeft: '2px solid var(--accent-amber)',
+                                  padding: '10px 14px',
+                                  marginTop: '6px',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '12px',
+                                  color: 'var(--accent-amber)',
+                                  whiteSpace: 'pre-wrap',
+                                  lineHeight: '1.5'
+                                }}>
+                                  {storedDebrief}
+                                </div>
+                              )}
+                            </div>
+                          )}
 
                           {/* Stats line */}
                           <div 
@@ -1568,6 +1994,101 @@ export default function App() {
           </div>
         )}
       </main>
+
+      {/* End of Day AI Debrief Modal */}
+      {showDebriefModal && (
+        <div className="debrief-modal-overlay" style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(7, 8, 10, 0.95)',
+          zIndex: 100000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px'
+        }}>
+          <div className="debrief-modal-box" style={{
+            width: '100%',
+            maxWidth: '600px',
+            background: 'var(--bg-card)',
+            border: '2px solid var(--accent-amber)',
+            padding: '24px',
+            boxShadow: '0 0 20px var(--accent-amber-glow)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--accent-amber)',
+            position: 'relative'
+          }}>
+            <div style={{
+              borderBottom: '1px dashed var(--accent-amber)',
+              paddingBottom: '12px',
+              marginBottom: '16px',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center'
+            }}>
+              <span style={{ fontWeight: 'bold', fontSize: '16px', letterSpacing: '0.05em' }}>
+                &gt; COMMANDER_DEBRIEF // TAC-NET
+              </span>
+              <span className="pulse-dot" style={{ width: '8px', height: '8px', background: 'var(--accent-amber)' }}></span>
+            </div>
+
+            {debriefLoading ? (
+              <div style={{ padding: '40px 0', textAlign: 'center', fontSize: '14px', letterSpacing: '0.1em' }}>
+                <span className="loading-blink">ESTABLISHING CONNECTION TO COMMAND...</span>
+              </div>
+            ) : debriefError ? (
+              <div style={{ padding: '20px 0', color: 'var(--accent-coral)' }}>
+                [!] COMMS ERROR: UNABLE TO CONTACT COMMANDER. SILENT GATEWAY.
+              </div>
+            ) : (
+              <div style={{ 
+                whiteSpace: 'pre-wrap', 
+                fontSize: '13px', 
+                lineHeight: '1.6', 
+                maxHeight: '400px', 
+                overflowY: 'auto',
+                paddingRight: '10px'
+              }}>
+                {debriefText}
+              </div>
+            )}
+
+            {!debriefLoading && (
+              <div style={{
+                marginTop: '24px',
+                display: 'flex',
+                justifyContent: 'flex-end',
+                borderTop: '1px dashed var(--border-color)',
+                paddingTop: '16px'
+              }}>
+                <button 
+                  onClick={closeDebriefModal}
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--accent-amber)',
+                    color: 'var(--accent-amber)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '12px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--accent-amber)';
+                    e.currentTarget.style.color = 'var(--bg-terminal)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-terminal)';
+                    e.currentTarget.style.color = 'var(--accent-amber)';
+                  }}
+                >
+                  [ DISMISS COMMS ]
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
