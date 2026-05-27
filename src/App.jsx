@@ -815,8 +815,14 @@ export default function App() {
   const [flavors, setFlavors] = useState({});
   const [isFlavorLoading, setIsFlavorLoading] = useState(false);
   const [unlockedTasks, setUnlockedTasks] = useState([]);
-  const [isSkillMapExpanded, setIsSkillMapExpanded] = useState(true);
-  const [isLifeMetricsExpanded, setIsLifeMetricsExpanded] = useState(true);
+  const [isSkillMapExpanded, setIsSkillMapExpanded] = useState(() => {
+    const saved = storage.getItem('isSkillMapExpanded');
+    return saved !== null ? saved === 'true' : true;
+  });
+  const [isLifeMetricsExpanded, setIsLifeMetricsExpanded] = useState(() => {
+    const saved = storage.getItem('isLifeMetricsExpanded');
+    return saved !== null ? saved === 'true' : true;
+  });
   const [weeklyReview, setWeeklyReview] = useState(null);
   const [isWeeklyReviewDismissed, setIsWeeklyReviewDismissed] = useState(false);
 
@@ -1679,7 +1685,7 @@ export default function App() {
 
 
   // Toggle mission completion for both type A and type B tasks
-  const handleToggleMission = (taskId, xpReward, isChainTask, chainName, stepIdx, e) => {
+  const handleToggleMission = async (taskId, xpReward, isChainTask, chainName, stepIdx, e) => {
     if (isDayClosed) return;
     const today = getTodayString();
     const yesterday = getYesterdayString();
@@ -1725,6 +1731,7 @@ export default function App() {
     }
 
     let netXpChange = 0;
+    let updatedProgress = chainProgress;
 
     if (isChainTask) {
       if (!isCompleted) {
@@ -1743,6 +1750,13 @@ export default function App() {
         
         completionTimes[taskId] = new Date().toISOString();
         netXpChange = xpReward;
+
+        updatedProgress = { ...chainProgress, [chainName]: Math.max(chainProgress[chainName] || 0, stepIdx + 1) };
+        setChainProgress(updatedProgress);
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set('chainProgress', JSON.stringify(updatedProgress));
+        }
+        storage.setItem('chainProgress', JSON.stringify(updatedProgress));
       } else {
         // UNMARK PROGRESSIVE CHAIN TASK
         // Unmarking removes this step and any higher chain steps that have been checked
@@ -1780,6 +1794,13 @@ export default function App() {
           }
           return true;
         }));
+
+        updatedProgress = { ...chainProgress, [chainName]: Math.min(chainProgress[chainName] || 0, stepIdx) };
+        setChainProgress(updatedProgress);
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set('chainProgress', JSON.stringify(updatedProgress));
+        }
+        storage.setItem('chainProgress', JSON.stringify(updatedProgress));
       }
     } else {
       // FIXED TASK TOGGLING
@@ -1838,7 +1859,7 @@ export default function App() {
       // Synchronize changes to Cloudflare KV
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
-        saveProgressToServer(activePasscode, updatedState, newProfile, chainProgress, completionTimes);
+        saveProgressToServer(activePasscode, updatedState, newProfile, updatedProgress, completionTimes);
       }
 
       return newProfile;
@@ -1848,23 +1869,49 @@ export default function App() {
   // Determine active & visible chain task steps dynamically based on starting perm steps
   const getVisibleChainSteps = (chainName) => {
     const chain = CHAINS[chainName];
+    if (!chain) return [];
     const currentIdx = chainProgress[chainName] !== undefined ? chainProgress[chainName] : 0;
-    if (currentIdx >= chain.length) return [];
     
+    // Find how many steps of this chain were completed today
+    const completedTodayCount = dailyState.completedTaskIds.filter(id => 
+      id.startsWith(`chain:${chainName}:`)
+    ).length;
+    
+    const startOfDayIdx = Math.max(0, currentIdx - completedTodayCount);
     const visible = [];
-    const stepId = `chain:${chainName}:${currentIdx}`;
-    visible.push({
-      id: stepId,
-      stepIdx: currentIdx,
-      task: chain[currentIdx]
-    });
-
-    let nextIdx = currentIdx + 1;
-    while (nextIdx < chain.length) {
-      const nextStepId = `chain:${chainName}:${nextIdx}`;
-      if (unlockedTasks.includes(nextStepId)) {
+    
+    // Push all completed steps today
+    for (let i = startOfDayIdx; i < currentIdx; i++) {
+      if (chain[i]) {
+        visible.push({
+          id: `chain:${chainName}:${i}`,
+          stepIdx: i,
+          task: chain[i]
+        });
+      }
+    }
+    
+    // Push the next active step if either:
+    // 1. No steps have been completed today (show the active step for today)
+    // 2. Or, the next step is explicitly unlocked in session-only unlockedTasks
+    if (currentIdx < chain.length) {
+      const nextStepId = `chain:${chainName}:${currentIdx}`;
+      if (completedTodayCount === 0 || unlockedTasks.includes(nextStepId)) {
         visible.push({
           id: nextStepId,
+          stepIdx: currentIdx,
+          task: chain[currentIdx]
+        });
+      }
+    }
+    
+    // Push any subsequent steps in unlockedTasks
+    let nextIdx = currentIdx + 1;
+    while (nextIdx < chain.length) {
+      const subStepId = `chain:${chainName}:${nextIdx}`;
+      if (unlockedTasks.includes(subStepId)) {
+        visible.push({
+          id: subStepId,
           stepIdx: nextIdx,
           task: chain[nextIdx]
         });
@@ -2427,7 +2474,7 @@ export default function App() {
             <section className="skill-map-section">
               <div 
                 className="panel-title-clickable" 
-                onClick={() => setIsSkillMapExpanded(!isSkillMapExpanded)} 
+                onClick={() => setIsSkillMapExpanded(prev => { const next = !prev; storage.setItem('isSkillMapExpanded', String(next)); return next; })} 
                 style={{ 
                   cursor: 'pointer', 
                   display: 'flex', 
@@ -2453,7 +2500,7 @@ export default function App() {
 
               {isSkillMapExpanded && (
                 <div className="skill-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                  {['NETWORKING', 'LINUX', 'SOC OPERATIONS', 'WEB SECURITY', 'TOOLS MASTERY', 'ACTIVE DIRECTORY', 'INTERVIEW PREP'].map(domain => {
+                  {['NETWORKING', 'LINUX', 'SOC OPERATIONS', 'WEB SECURITY', 'TOOLS MASTERY', 'ACTIVE DIRECTORY', 'INTERVIEW PREP', 'THM / LABS'].map(domain => {
                     const chain = CHAINS[domain];
                     const completedCount = chainProgress[domain] || 0;
                     const totalSteps = chain.length;
@@ -2477,7 +2524,7 @@ export default function App() {
                             {domain}
                           </span>
                           <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-amber)' }}>
-                            {pct}%
+                            {completedCount} / {totalSteps} ({pct}%)
                           </span>
                         </div>
                         
@@ -2711,7 +2758,7 @@ export default function App() {
             <section className="life-metrics-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
               <div 
                 className="panel-title-clickable" 
-                onClick={() => setIsLifeMetricsExpanded(!isLifeMetricsExpanded)} 
+                onClick={() => setIsLifeMetricsExpanded(prev => { const next = !prev; storage.setItem('isLifeMetricsExpanded', String(next)); return next; })} 
                 style={{ 
                   cursor: 'pointer', 
                   display: 'flex', 
@@ -2999,7 +3046,7 @@ export default function App() {
                                       className="log-entry-name" 
                                       style={{ 
                                         fontSize: '13px', 
-                                        color: 'var(--text-main)',
+                                        color: 'var(--accent-green)',
                                         whiteSpace: 'nowrap',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis'
@@ -3067,7 +3114,7 @@ export default function App() {
                                       className="log-entry-name" 
                                       style={{ 
                                         fontSize: '13px', 
-                                        color: 'var(--text-muted)',
+                                        color: log.xpPenalty ? 'var(--accent-coral)' : 'var(--text-muted)',
                                         whiteSpace: 'nowrap',
                                         overflow: 'hidden',
                                         textOverflow: 'ellipsis'
