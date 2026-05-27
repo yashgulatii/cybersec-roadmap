@@ -3797,6 +3797,31 @@ export default function App() {
     );
   };
 
+  const renderFullSchedule = () => {
+    return (
+      <div className="schedule-container">
+        {SCHEDULE_BLOCKS.map((block, idx) => {
+          const isActive = activeBlockIndex === idx;
+          return (
+            <div 
+              key={idx} 
+              className={`timeline-block border-${block.category} ${isActive ? 'active-block' : ''}`}
+            >
+              <div className="timeline-time">{block.time}</div>
+              <div className="timeline-details">
+                <div className="timeline-header-group">
+                  <span className="timeline-name">{block.name}</span>
+                  <span className="timeline-desc">{block.desc}</span>
+                </div>
+                <span className="timeline-type-tag">{block.category}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+
   return (
     <div className="layout-wrapper">
       {/* LEFT SIDEBAR NAVIGATION */}
@@ -3820,6 +3845,12 @@ export default function App() {
             onClick={() => setActivePage('projects')}
           >
             <span>📁</span> PROJECTS
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'schedule' ? 'active' : ''}`} 
+            onClick={() => setActivePage('schedule')}
+          >
+            <span>📅</span> SCHEDULE
           </div>
           <div 
             className={`sidebar-link ${activePage === 'skillmap' ? 'active' : ''}`} 
@@ -4011,6 +4042,12 @@ export default function App() {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {renderProjectOps()}
             {renderProjectBoard()}
+          </div>
+        )}
+
+        {activePage === 'schedule' && (
+          <div>
+            {renderFullSchedule()}
           </div>
         )}
 
