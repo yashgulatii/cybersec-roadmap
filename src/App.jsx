@@ -285,107 +285,55 @@ const initializeTelemetry = () => {
     }
   }
 
-  // Detect day transition
-  if (lastActiveDate && lastActiveDate !== today) {
-    // Load yesterday's state
-    const yesterdayStateKey = `state:${lastActiveDate}`;
-    const yesterdayStateRaw = storage.getItem(yesterdayStateKey);
-    let yesterdayCompletedTaskIds = [];
-    if (yesterdayStateRaw) {
-      try {
-        const parsed = JSON.parse(yesterdayStateRaw);
-        if (parsed && Array.isArray(parsed.completedTaskIds)) {
-          yesterdayCompletedTaskIds = parsed.completedTaskIds;
-        }
-      } catch (err) {
-        console.error("Failed to parse yesterday state", err);
+  // Scan all past states and logs in storage to ensure all previous completed chain tasks are accounted for
+  try {
+    const allKeys = [];
+    for (let i = 0; i < storage.length; i++) {
+      const k = storage.key(i);
+      if (k && (k.startsWith('state:') || k.startsWith('log:'))) {
+        allKeys.push(k);
       }
     }
-
-    // Retrieve yesterday's completion timestamps
-    const yesterdayTimesKey = `completion_times:${lastActiveDate}`;
-    const yesterdayTimesRaw = storage.getItem(yesterdayTimesKey);
-    let yesterdayTimes = {};
-    if (yesterdayTimesRaw) {
-      try {
-        const parsedTimes = JSON.parse(yesterdayTimesRaw);
-        if (parsedTimes && typeof parsedTimes === 'object') {
-          yesterdayTimes = parsedTimes;
-        }
-      } catch (err) {
-        console.error("Failed to parse yesterday completion times", err);
-      }
-    }
-
-    const logEntries = [];
-    
-    // Process yesterday's fixed tasks (both completed and missed)
-    FIXED_TASKS.forEach(task => {
-      const isCompleted = yesterdayCompletedTaskIds.includes(task.id);
-      const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
-      logEntries.push({
-        taskName: task.title,
-        tag: task.category,
-        xp: task.xp,
-        completedAt: isCompleted ? (yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`) : null,
-        type: isCompleted ? 'completed' : 'missed',
-        ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
-      });
-    });
-
-    // Process yesterday's completed chain tasks
-    yesterdayCompletedTaskIds.forEach(id => {
-      if (id.startsWith('chain:')) {
-        const parts = id.split(':');
-        if (parts.length === 3) {
-          const chainName = parts[1];
-          const stepIdx = parseInt(parts[2], 10);
-          const chain = CHAINS[chainName];
-          if (chain && chain[stepIdx]) {
-            const stepTask = chain[stepIdx];
-            logEntries.push({
-              taskName: stepTask.title,
-              tag: stepTask.category,
-              xp: stepTask.xp,
-              completedAt: yesterdayTimes[id] || `${lastActiveDate}T12:00:00.000Z`,
-              type: 'completed'
+    allKeys.forEach(k => {
+      const raw = storage.getItem(k);
+      if (raw) {
+        if (k.startsWith('state:')) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed.completedTaskIds)) {
+            parsed.completedTaskIds.forEach(id => {
+              if (id.startsWith('chain:')) {
+                const parts = id.split(':');
+                if (parts.length === 3) {
+                  const chainName = parts[1];
+                  const stepIdx = parseInt(parts[2], 10);
+                  if (chainProgress[chainName] !== undefined) {
+                    chainProgress[chainName] = Math.max(chainProgress[chainName], stepIdx + 1);
+                  }
+                }
+              }
+            });
+          }
+        } else if (k.startsWith('log:')) {
+          const parsed = JSON.parse(raw);
+          if (parsed && Array.isArray(parsed)) {
+            parsed.forEach(entry => {
+              if (entry.type === 'completed' && entry.taskName) {
+                Object.keys(CHAINS).forEach(chainName => {
+                  const stepIdx = CHAINS[chainName].findIndex(step => step.title === entry.taskName);
+                  if (stepIdx !== -1) {
+                    chainProgress[chainName] = Math.max(chainProgress[chainName], stepIdx + 1);
+                  }
+                });
+              }
             });
           }
         }
       }
     });
-
-    // Save yesterday's log compile
-    storage.setItem(`log:${lastActiveDate}`, JSON.stringify(logEntries));
-
-    // Advance permanent chainProgress for steps completed yesterday
-    Object.keys(CHAINS).forEach(chainName => {
-      let currentP = chainProgress[chainName] || 0;
-      let nextP = currentP;
-      
-      while (true) {
-        const stepId = `chain:${chainName}:${nextP}`;
-        if (yesterdayCompletedTaskIds.includes(stepId)) {
-          nextP = nextP + 1; // ONLY moves forward, never resets/wraps
-        } else {
-          break;
-        }
-      }
-      chainProgress[chainName] = nextP;
-    });
     storage.setItem('chainProgress', JSON.stringify(chainProgress));
-
-    // Clean up yesterday's completed project tasks
-    ['ad-lab', 'threat-intel', 'cloud-scanner'].forEach(id => {
-      storage.removeItem(`projectCompleted:${id}`);
-    });
-
-    // Clean up auxiliary yesterday times
-    storage.removeItem(yesterdayTimesKey);
+  } catch (err) {
+    console.error("Failed to reconstruct chainProgress from historical states/logs", err);
   }
-
-  // Save last active date as today
-  storage.setItem('operator_completion_date', today);
 
   // Initialize today's state
   let dailyState = { completedTaskIds: [], unlockedChainSteps: {} };
@@ -832,9 +780,9 @@ export default function App() {
   const [weeklyReview, setWeeklyReview] = useState(null);
   const [isWeeklyReviewDismissed, setIsWeeklyReviewDismissed] = useState(false);
 
-  // Load or initialize today's active rotating domain
+  // Load or initialize today's active rotating domain & check day transition
   useEffect(() => {
-    const initDomain = async () => {
+    const initDomainAndTransition = async () => {
       const rotationOrder = ['NETWORKING', 'LINUX', 'SOC_OPERATIONS', 'WEB_SECURITY', 'TOOLS_MASTERY', 'ACTIVE_DIRECTORY', 'INTERVIEW_PREP', 'THM_LABS'];
       const dayIndex = Math.floor(Date.now() / 86400000);
       const defaultDomain = rotationOrder[dayIndex % rotationOrder.length];
@@ -870,8 +818,172 @@ export default function App() {
         localStorage.setItem(`activeDomain:${todayISO}`, domainVal);
       }
       setTodaysDomain(domainVal);
+
+      // Now run async Day Transition: stored date ≠ today on app load
+      let lastActiveDate = null;
+      if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
+        try {
+          const res = await window.storage.get('operator_completion_date');
+          lastActiveDate = res ? (typeof res === 'object' && res.value !== undefined ? res.value : res) : null;
+        } catch {}
+      }
+      if (!lastActiveDate) {
+        lastActiveDate = storage.getItem('operator_completion_date');
+      }
+
+      if (lastActiveDate && lastActiveDate !== todayISO) {
+        // Step 1 — Load yesterday's state first:
+        let completedYesterday = [];
+        let yesterdayTimes = {};
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
+          try {
+            const yesterdayState = await window.storage.get(`state:${lastActiveDate}`);
+            if (yesterdayState) {
+              const val = typeof yesterdayState === 'object' && yesterdayState.value !== undefined ? yesterdayState.value : yesterdayState;
+              const parsed = typeof val === 'string' ? JSON.parse(val) : val;
+              completedYesterday = parsed?.completedTaskIds || [];
+            }
+            const yesterdayTimesRes = await window.storage.get(`completion_times:${lastActiveDate}`);
+            if (yesterdayTimesRes) {
+              const val = typeof yesterdayTimesRes === 'object' && yesterdayTimesRes.value !== undefined ? yesterdayTimesRes.value : yesterdayTimesRes;
+              yesterdayTimes = typeof val === 'string' ? JSON.parse(val) : val;
+            }
+          } catch {}
+        } else {
+          const yesterdayStateRaw = storage.getItem(`state:${lastActiveDate}`);
+          if (yesterdayStateRaw) {
+            try {
+              completedYesterday = JSON.parse(yesterdayStateRaw)?.completedTaskIds || [];
+            } catch {}
+          }
+          const yesterdayTimesRaw = storage.getItem(`completion_times:${lastActiveDate}`);
+          if (yesterdayTimesRaw) {
+            try {
+              yesterdayTimes = JSON.parse(yesterdayTimesRaw) || {};
+            } catch {}
+          }
+        }
+
+        // Step 2 — Advance chainProgress for every chain task completed yesterday:
+        let localChainProg = {};
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
+          try {
+            const res = await window.storage.get('chainProgress');
+            if (res) {
+              const val = typeof res === 'object' && res.value !== undefined ? res.value : res;
+              localChainProg = typeof val === 'string' ? JSON.parse(val) : val;
+            }
+          } catch {}
+        }
+        if (!localChainProg || Object.keys(localChainProg).length === 0) {
+          const localSaved = storage.getItem('chainProgress');
+          if (localSaved) {
+            try {
+              localChainProg = JSON.parse(localSaved) || {};
+            } catch {}
+          }
+        }
+
+        const newChainProgress = {
+          'NETWORKING': 0,
+          'LINUX': 0,
+          'SOC OPERATIONS': 0,
+          'WEB SECURITY': 0,
+          'TOOLS MASTERY': 0,
+          'ACTIVE DIRECTORY': 0,
+          'INTERVIEW PREP': 0,
+          'THM / LABS': 0,
+          ...localChainProg
+        };
+
+        for (const taskId of completedYesterday) {
+          for (const [chainId, chain] of Object.entries(CHAINS)) {
+            const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
+            let stepIndex = -1;
+            if (taskId.startsWith(`chain:${chainId}:`)) {
+              stepIndex = parseInt(taskId.split(':')[2], 10);
+            } else {
+              stepIndex = tasksArray.findIndex(t => t.id === taskId);
+            }
+
+            if (stepIndex !== -1) {
+              const currentStep = newChainProgress[chainId] || 0;
+              if (stepIndex === currentStep) {
+                newChainProgress[chainId] = currentStep + 1;
+              }
+            }
+          }
+        }
+
+        setChainProgress(newChainProgress);
+        storage.setItem('chainProgress', JSON.stringify(newChainProgress));
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set('chainProgress', JSON.stringify(newChainProgress));
+        }
+
+        // Compile logs for yesterday
+        const logEntries = [];
+        FIXED_TASKS.forEach(task => {
+          const isCompleted = completedYesterday.includes(task.id);
+          const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+          logEntries.push({
+            taskName: task.title,
+            tag: task.category,
+            xp: task.xp,
+            completedAt: isCompleted ? (yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`) : null,
+            type: isCompleted ? 'completed' : 'missed',
+            ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
+          });
+        });
+
+        completedYesterday.forEach(taskId => {
+          if (taskId.startsWith('chain:')) {
+            const parts = taskId.split(':');
+            if (parts.length === 3) {
+              const chainName = parts[1];
+              const stepIdx = parseInt(parts[2], 10);
+              const chain = CHAINS[chainName];
+              if (chain && chain[stepIdx]) {
+                const stepTask = chain[stepIdx];
+                logEntries.push({
+                  taskName: stepTask.title,
+                  tag: stepTask.category,
+                  xp: stepTask.xp,
+                  completedAt: yesterdayTimes[taskId] || `${lastActiveDate}T12:00:00.000Z`,
+                  type: 'completed'
+                });
+              }
+            }
+          }
+        });
+
+        storage.setItem(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+        }
+
+        // Clean up yesterday's completed project tasks and completion times
+        ['ad-lab', 'threat-intel', 'cloud-scanner'].forEach(id => {
+          storage.removeItem(`projectCompleted:${id}`);
+        });
+        storage.removeItem(`completion_times:${lastActiveDate}`);
+
+        // Commit operator_completion_date as todayISO
+        storage.setItem('operator_completion_date', todayISO);
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set('operator_completion_date', todayISO);
+        }
+
+        // Step 3 — Then create fresh today state with no completed tasks
+        const freshTodayState = { completedTaskIds: [], unlockedChainSteps: {} };
+        setDailyState(freshTodayState);
+        storage.setItem(`state:${todayISO}`, JSON.stringify(freshTodayState));
+        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
+          await window.storage.set(`state:${todayISO}`, JSON.stringify(freshTodayState));
+        }
+      }
     };
-    initDomain();
+    initDomainAndTransition();
   }, []);
 
   // Missed task penalty banner state
@@ -1257,6 +1369,55 @@ export default function App() {
             const localVal = localChainProgress[key] !== undefined ? localChainProgress[key] : 0;
             resolvedChainProgress[key] = Math.max(localVal, remoteVal);
           });
+
+          // Scan all past states and logs in storage to ensure all previous completed chain tasks are accounted for
+          try {
+            const allKeys = [];
+            for (let i = 0; i < storage.length; i++) {
+              const k = storage.key(i);
+              if (k && (k.startsWith('state:') || k.startsWith('log:'))) {
+                allKeys.push(k);
+              }
+            }
+            allKeys.forEach(k => {
+              const raw = storage.getItem(k);
+              if (raw) {
+                if (k.startsWith('state:')) {
+                  const parsed = JSON.parse(raw);
+                  if (parsed && Array.isArray(parsed.completedTaskIds)) {
+                    parsed.completedTaskIds.forEach(id => {
+                      if (id.startsWith('chain:')) {
+                        const parts = id.split(':');
+                        if (parts.length === 3) {
+                          const chainName = parts[1];
+                          const stepIdx = parseInt(parts[2], 10);
+                          if (resolvedChainProgress[chainName] !== undefined) {
+                            resolvedChainProgress[chainName] = Math.max(resolvedChainProgress[chainName], stepIdx + 1);
+                          }
+                        }
+                      }
+                    });
+                  }
+                } else if (k.startsWith('log:')) {
+                  const parsed = JSON.parse(raw);
+                  if (parsed && Array.isArray(parsed)) {
+                    parsed.forEach(entry => {
+                      if (entry.type === 'completed' && entry.taskName) {
+                        Object.keys(CHAINS).forEach(chainName => {
+                          const stepIdx = CHAINS[chainName].findIndex(step => step.title === entry.taskName);
+                          if (stepIdx !== -1) {
+                            resolvedChainProgress[chainName] = Math.max(resolvedChainProgress[chainName], stepIdx + 1);
+                          }
+                        });
+                      }
+                    });
+                  }
+                }
+              }
+            });
+          } catch (e) {
+            console.error("Failed to reconstruct resolvedChainProgress from historical states/logs", e);
+          }
           
           // Restore completion times
           let resolvedCompletionTimes = {};
@@ -2721,57 +2882,72 @@ export default function App() {
                       }}>
                         TODAY'S SKILL: {chainName}
                       </div>
-                      {visibleSteps.map(({ id, stepIdx, task }) => {
-                        const isCompleted = dailyState.completedTaskIds.includes(id);
-                        const isJustUnlocked = justUnlockedStepId === id;
-                        const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
-                        const briefing = flavors[id]?.briefing;
-                        return (
-                          <div 
-                            key={id} 
-                            className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                            onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
-                          >
-                            <div className="checkbox-container">
-                              <span className="checkmark-icon"></span>
-                            </div>
-                            <div className="mission-details">
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                                <span className="mission-title">{displayTitle}</span>
-                                {isJustUnlocked && (
-                                  <span style={{ 
-                                    fontSize: '10px', 
-                                    fontFamily: 'var(--font-mono)', 
-                                    color: 'var(--accent-green)', 
-                                    border: '1px solid var(--accent-green)', 
-                                    padding: '0 4px', 
-                                    marginLeft: '8px',
-                                    textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
-                                    whiteSpace: 'nowrap'
+                      {visibleSteps.length === 0 ? (
+                        <div style={{
+                          background: 'rgba(34, 197, 94, 0.1)',
+                          border: '1px dashed var(--accent-green)',
+                          color: 'var(--accent-green)',
+                          padding: '12px 16px',
+                          fontSize: '13px',
+                          fontFamily: 'var(--font-mono)',
+                          textAlign: 'center',
+                          textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                        }}>
+                          [ {chainName} CHAIN COMPLETE — ALL STEPS CLEARED ]
+                        </div>
+                      ) : (
+                        visibleSteps.map(({ id, stepIdx, task }) => {
+                          const isCompleted = dailyState.completedTaskIds.includes(id);
+                          const isJustUnlocked = justUnlockedStepId === id;
+                          const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                          const briefing = flavors[id]?.briefing;
+                          return (
+                            <div 
+                              key={id} 
+                              className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                              onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
+                            >
+                              <div className="checkbox-container">
+                                <span className="checkmark-icon"></span>
+                              </div>
+                              <div className="mission-details">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                                  <span className="mission-title">{displayTitle}</span>
+                                  {isJustUnlocked && (
+                                    <span style={{ 
+                                      fontSize: '10px', 
+                                      fontFamily: 'var(--font-mono)', 
+                                      color: 'var(--accent-green)', 
+                                      border: '1px solid var(--accent-green)', 
+                                      padding: '0 4px', 
+                                      marginLeft: '8px',
+                                      textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                      whiteSpace: 'nowrap'
+                                    }}>
+                                      UNLOCKED
+                                    </span>
+                                  )}
+                                </div>
+                                {briefing && (
+                                  <span className="mission-briefing" style={{ 
+                                    display: 'block', 
+                                    fontSize: '11px', 
+                                    color: 'var(--text-muted)', 
+                                    marginTop: '2px', 
+                                    fontFamily: 'var(--font-mono)' 
                                   }}>
-                                    UNLOCKED
+                                    {briefing}
                                   </span>
                                 )}
-                              </div>
-                              {briefing && (
-                                <span className="mission-briefing" style={{ 
-                                  display: 'block', 
-                                  fontSize: '11px', 
-                                  color: 'var(--text-muted)', 
-                                  marginTop: '2px', 
-                                  fontFamily: 'var(--font-mono)' 
-                                }}>
-                                  {briefing}
-                                </span>
-                              )}
-                              <div className="mission-meta">
-                                <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                                <span className="xp-reward">+{task.xp} XP</span>
+                                <div className="mission-meta">
+                                  <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                                  <span className="xp-reward">+{task.xp} XP</span>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })
+                      )}
                     </div>
                   );
                 })}
