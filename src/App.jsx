@@ -339,6 +339,7 @@ export default function App() {
   // Daily Flavor Rotation (AI-Powered) state
   const [flavors, setFlavors] = useState({});
   const [isFlavorLoading, setIsFlavorLoading] = useState(false);
+  const [unlockedTasks, setUnlockedTasks] = useState([]);
 
   // Missed task penalty banner state
   const [showPenaltyBanner, setShowPenaltyBanner] = useState(() => {
@@ -969,7 +970,9 @@ export default function App() {
         const nextStepIdx = stepIdx + 1;
         if (nextStepIdx < chainLength) {
           currentUnlockedSteps[chainName] = nextStepIdx;
-          setJustUnlockedStepId(`chain:${chainName}:${nextStepIdx}`);
+          const nextStepId = `chain:${chainName}:${nextStepIdx}`;
+          setUnlockedTasks(prev => [...prev, nextStepId]);
+          setJustUnlockedStepId(nextStepId);
         }
         
         completionTimes[taskId] = new Date().toISOString();
@@ -1002,6 +1005,15 @@ export default function App() {
 
         // Reset the unlocked step back to the one we just unchecked
         currentUnlockedSteps[chainName] = stepIdx;
+
+        // Remove any higher unlocked tasks from session-only unlockedTasks
+        setUnlockedTasks(prev => prev.filter(id => {
+          if (id.startsWith(`chain:${chainName}:`)) {
+            const idx = parseInt(id.split(':')[2], 10);
+            return idx < stepIdx;
+          }
+          return true;
+        }));
       }
     } else {
       // FIXED TASK TOGGLING
@@ -1073,12 +1085,30 @@ export default function App() {
     const currentIdx = chainProgress[chainName] !== undefined ? chainProgress[chainName] : 0;
     if (currentIdx >= chain.length) return [];
     
+    const visible = [];
     const stepId = `chain:${chainName}:${currentIdx}`;
-    return [{
+    visible.push({
       id: stepId,
       stepIdx: currentIdx,
       task: chain[currentIdx]
-    }];
+    });
+
+    let nextIdx = currentIdx + 1;
+    while (nextIdx < chain.length) {
+      const nextStepId = `chain:${chainName}:${nextIdx}`;
+      if (unlockedTasks.includes(nextStepId)) {
+        visible.push({
+          id: nextStepId,
+          stepIdx: nextIdx,
+          task: chain[nextIdx]
+        });
+        nextIdx++;
+      } else {
+        break;
+      }
+    }
+    
+    return visible;
   };
 
   const DAILY_OPS_FIXED_TASKS = useMemo(() => {
