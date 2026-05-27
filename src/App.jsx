@@ -255,6 +255,11 @@ const getStageLabel = (pct) => {
   return 'OBJECTIVE COMPLETE';
 };
 
+const mapDomainKey = (domain) => {
+  if (domain === 'THM_LABS') return 'THM / LABS';
+  return domain.replace(/_/g, ' ');
+};
+
 // Day Transition & Initial Telemetry State Setup
 const initializeTelemetry = () => {
   const today = getTodayString();
@@ -815,6 +820,7 @@ export default function App() {
   const [flavors, setFlavors] = useState({});
   const [isFlavorLoading, setIsFlavorLoading] = useState(false);
   const [unlockedTasks, setUnlockedTasks] = useState([]);
+  const [todaysDomain, setTodaysDomain] = useState('NETWORKING');
   const [isSkillMapExpanded, setIsSkillMapExpanded] = useState(() => {
     const saved = storage.getItem('isSkillMapExpanded');
     return saved !== null ? saved === 'true' : true;
@@ -825,6 +831,48 @@ export default function App() {
   });
   const [weeklyReview, setWeeklyReview] = useState(null);
   const [isWeeklyReviewDismissed, setIsWeeklyReviewDismissed] = useState(false);
+
+  // Load or initialize today's active rotating domain
+  useEffect(() => {
+    const initDomain = async () => {
+      const rotationOrder = ['NETWORKING', 'LINUX', 'SOC_OPERATIONS', 'WEB_SECURITY', 'TOOLS_MASTERY', 'ACTIVE_DIRECTORY', 'INTERVIEW_PREP', 'THM_LABS'];
+      const dayIndex = Math.floor(Date.now() / 86400000);
+      const defaultDomain = rotationOrder[dayIndex % rotationOrder.length];
+      
+      const todayISO = getTodayString(); // YYYY-MM-DD
+      const todayDateStr = new Date().toDateString(); // Wed May 27 2026
+      
+      let domainVal = defaultDomain;
+      if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
+        try {
+          const storedDateStr = await window.storage.get(`activeDomain:${todayDateStr}`);
+          const storedISOStr = await window.storage.get(`activeDomain:${todayISO}`);
+          const stored = storedDateStr || storedISOStr;
+          
+          if (stored) {
+            domainVal = typeof stored === 'object' && stored !== null && 'value' in stored ? stored.value : (typeof stored === 'string' ? stored : defaultDomain);
+          }
+          
+          await window.storage.set(`activeDomain:${todayDateStr}`, domainVal);
+          await window.storage.set(`activeDomain:${todayISO}`, domainVal);
+        } catch (e) {
+          console.error("Failed to read/write activeDomain via window.storage", e);
+        }
+      } else {
+        const localDateStr = localStorage.getItem(`activeDomain:${todayDateStr}`);
+        const localISOStr = localStorage.getItem(`activeDomain:${todayISO}`);
+        const local = localDateStr || localISOStr;
+        
+        if (local) {
+          domainVal = local;
+        }
+        localStorage.setItem(`activeDomain:${todayDateStr}`, domainVal);
+        localStorage.setItem(`activeDomain:${todayISO}`, domainVal);
+      }
+      setTodaysDomain(domainVal);
+    };
+    initDomain();
+  }, []);
 
   // Missed task penalty banner state
   const [showPenaltyBanner, setShowPenaltyBanner] = useState(() => {
@@ -2655,58 +2703,77 @@ export default function App() {
 
                 {/* Render Type B - Active and Completed Progressive Chain tasks */}
                 {Object.keys(CHAINS).map(chainName => {
+                  const mappedActive = mapDomainKey(todaysDomain);
+                  if (chainName !== mappedActive) return null;
+
                   const visibleSteps = getVisibleChainSteps(chainName);
-                  return visibleSteps.map(({ id, stepIdx, task }) => {
-                    const isCompleted = dailyState.completedTaskIds.includes(id);
-                    const isJustUnlocked = justUnlockedStepId === id;
-                    const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
-                    const briefing = flavors[id]?.briefing;
-                    return (
-                      <div 
-                        key={id} 
-                        className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                        onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
-                      >
-                        <div className="checkbox-container">
-                          <span className="checkmark-icon"></span>
-                        </div>
-                        <div className="mission-details">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                            <span className="mission-title">{displayTitle}</span>
-                            {isJustUnlocked && (
-                              <span style={{ 
-                                fontSize: '10px', 
-                                fontFamily: 'var(--font-mono)', 
-                                color: 'var(--accent-green)', 
-                                border: '1px solid var(--accent-green)', 
-                                padding: '0 4px', 
-                                marginLeft: '8px',
-                                textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                UNLOCKED
-                              </span>
-                            )}
-                          </div>
-                          {briefing && (
-                            <span className="mission-briefing" style={{ 
-                              display: 'block', 
-                              fontSize: '11px', 
-                              color: 'var(--text-muted)', 
-                              marginTop: '2px', 
-                              fontFamily: 'var(--font-mono)' 
-                            }}>
-                              {briefing}
-                            </span>
-                          )}
-                          <div className="mission-meta">
-                            <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                            <span className="xp-reward">+{task.xp} XP</span>
-                          </div>
-                        </div>
+                  return (
+                    <div key={chainName} style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                      <div style={{
+                        fontFamily: 'var(--font-mono)',
+                        color: 'var(--accent-amber)',
+                        fontSize: '11px',
+                        fontWeight: 'bold',
+                        letterSpacing: '0.1em',
+                        textTransform: 'uppercase',
+                        fontVariant: 'small-caps',
+                        marginBottom: '6px'
+                      }}>
+                        TODAY'S SKILL: {chainName}
                       </div>
-                    );
-                  });
+                      {visibleSteps.map(({ id, stepIdx, task }) => {
+                        const isCompleted = dailyState.completedTaskIds.includes(id);
+                        const isJustUnlocked = justUnlockedStepId === id;
+                        const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                        const briefing = flavors[id]?.briefing;
+                        return (
+                          <div 
+                            key={id} 
+                            className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                            onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
+                          >
+                            <div className="checkbox-container">
+                              <span className="checkmark-icon"></span>
+                            </div>
+                            <div className="mission-details">
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                                <span className="mission-title">{displayTitle}</span>
+                                {isJustUnlocked && (
+                                  <span style={{ 
+                                    fontSize: '10px', 
+                                    fontFamily: 'var(--font-mono)', 
+                                    color: 'var(--accent-green)', 
+                                    border: '1px solid var(--accent-green)', 
+                                    padding: '0 4px', 
+                                    marginLeft: '8px',
+                                    textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    UNLOCKED
+                                  </span>
+                                )}
+                              </div>
+                              {briefing && (
+                                <span className="mission-briefing" style={{ 
+                                  display: 'block', 
+                                  fontSize: '11px', 
+                                  color: 'var(--text-muted)', 
+                                  marginTop: '2px', 
+                                  fontFamily: 'var(--font-mono)' 
+                                }}>
+                                  {briefing}
+                                </span>
+                              )}
+                              <div className="mission-meta">
+                                <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                                <span className="xp-reward">+{task.xp} XP</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
                 })}
               </div>
             </section>
