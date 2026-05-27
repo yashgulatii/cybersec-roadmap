@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import './index.css';
-import { fetchFlavorRotation, fetchDailyDebrief } from './services/aiService';
+import { fetchFlavorRotation, fetchDailyDebrief, fetchWeeklyReview } from './services/aiService';
 
 const storage = typeof window !== 'undefined' && window.storage ? window.storage : localStorage;
 
@@ -24,83 +24,186 @@ const FIXED_TASKS = [
 
 // Type B - 6 Progressive Chain Tasks
 const CHAINS = {
-  'Networking Fundamentals': [
-    { title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-    { title: 'Memorise top 25 ports (Groups 3–4)', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-    { title: 'OSI model: all 7 layers cold recall', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-    { title: 'TCP/IP model vs OSI — where they differ', category: 'ROADMAP', xp: 45, stat: 'SIGINT', bonus: 4 },
-    { title: 'Subnetting basics (CIDR, /24, /16)', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
-    { title: 'Nmap: basic scan types (-sS, -sV, -sC)', category: 'ROADMAP', xp: 60, stat: 'SIGINT', bonus: 6 },
-    { title: 'Nmap: advanced (OS detect, scripts, timing)', category: 'ROADMAP', xp: 65, stat: 'SIGINT', bonus: 6 },
-    { title: 'Wireshark: capture and filter basics', category: 'ROADMAP', xp: 60, stat: 'SIGINT', bonus: 6 },
-    { title: 'DNS, DHCP, ARP — how each works', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
-    { title: 'HTTP vs HTTPS, TLS handshake', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 }
+  'NETWORKING': [
+    { title: 'Memorise top 25 ports (Groups 1–2)', category: 'ROADMAP', xp: 50 },
+    { title: 'Memorise top 25 ports (Groups 3–4)', category: 'ROADMAP', xp: 50 },
+    { title: 'OSI model: all 7 layers cold recall', category: 'ROADMAP', xp: 50 },
+    { title: 'TCP/IP model vs OSI — differences', category: 'ROADMAP', xp: 45 },
+    { title: 'Subnetting basics (CIDR, /24, /16)', category: 'ROADMAP', xp: 55 },
+    { title: 'Nmap: basic scan types (-sS, -sV, -sC)', category: 'ROADMAP', xp: 60 },
+    { title: 'Nmap: advanced (OS detect, scripts, timing)', category: 'ROADMAP', xp: 65 },
+    { title: 'Wireshark: capture and filter basics', category: 'ROADMAP', xp: 60 },
+    { title: 'DNS, DHCP, ARP — how each works', category: 'ROADMAP', xp: 55 },
+    { title: 'HTTP vs HTTPS, TLS handshake', category: 'ROADMAP', xp: 55 }
   ],
-  'Active Directory': [
-    { title: 'AD concepts: Kerberos, LDAP, AD structure', category: 'ROADMAP', xp: 55, stat: 'SIGINT', bonus: 5 },
-    { title: 'AD Lab: setup and domain join (2h session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
-    { title: 'AD enumeration with BloodHound', category: 'LABS', xp: 70, stat: 'SIGINT', bonus: 7 },
-    { title: 'Kerberoasting attack walkthrough', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
-    { title: 'Pass-the-Hash and Pass-the-Ticket', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
-    { title: 'AD privilege escalation paths', category: 'LABS', xp: 80, stat: 'SIGINT', bonus: 8 },
-    { title: 'AD defence: what defenders look for', category: 'INTEL', xp: 65, stat: 'SIGINT', bonus: 6 }
+  'LINUX': [
+    { title: 'Linux file system structure (/, /etc, /var, /home)', category: 'ROADMAP', xp: 45 },
+    { title: 'Core commands: ls, cd, chmod, chown, find, grep', category: 'ROADMAP', xp: 45 },
+    { title: 'File permissions and ownership', category: 'ROADMAP', xp: 45 },
+    { title: 'Process management: ps, top, kill, jobs', category: 'ROADMAP', xp: 45 },
+    { title: 'Bash scripting: variables, loops, conditionals', category: 'ROADMAP', xp: 55 },
+    { title: 'Network commands: netstat, ss, curl, wget, dig', category: 'ROADMAP', xp: 50 },
+    { title: 'Log analysis: /var/log, journalctl, grep patterns', category: 'ROADMAP', xp: 55 },
+    { title: 'Service management with systemctl', category: 'ROADMAP', xp: 50 },
+    { title: 'SSH: key-based auth, config, tunneling', category: 'ROADMAP', xp: 55 },
+    { title: 'Linux hardening basics: firewall, users, cron', category: 'ROADMAP', xp: 60 }
   ],
-  'Web AppSec': [
-    { title: 'OWASP Top 10: read and summarise', category: 'ROADMAP', xp: 50, stat: 'SIGINT', bonus: 5 },
-    { title: 'Burp Suite: intercept and repeat a request', category: 'LABS', xp: 55, stat: 'SIGINT', bonus: 5 },
-    { title: 'PortSwigger: SQL Injection lab', category: 'LABS', xp: 60, stat: 'SIGINT', bonus: 6 },
-    { title: 'PortSwigger: XSS lab', category: 'LABS', xp: 60, stat: 'SIGINT', bonus: 6 },
-    { title: 'PortSwigger: IDOR lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
-    { title: 'PortSwigger: SSRF lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
-    { title: 'PortSwigger: Auth bypass lab', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 },
-    { title: 'Write a 1-page VAPT mini-report on any finding', category: 'BUILD', xp: 75, stat: 'ARSENAL', bonus: 7 }
+  'SOC OPERATIONS': [
+    { title: 'SOC roles and responsibilities', category: 'ROADMAP', xp: 45 },
+    { title: 'SIEM basics: what it does, key vendors (Splunk, QRadar)', category: 'ROADMAP', xp: 50 },
+    { title: 'Log types: Windows Event, syslog, firewall logs', category: 'ROADMAP', xp: 50 },
+    { title: 'Alert triage: P1/P2/P3 classification', category: 'ROADMAP', xp: 55 },
+    { title: 'IOC vs IOA: understanding indicators', category: 'ROADMAP', xp: 50 },
+    { title: 'Incident response: 6 phases', category: 'ROADMAP', xp: 55 },
+    { title: 'Splunk: basic SPL search queries', category: 'LABS', xp: 65 },
+    { title: 'Write a mock incident response report', category: 'BUILD', xp: 70 },
+    { title: 'Threat hunting basics', category: 'ROADMAP', xp: 60 },
+    { title: 'MITRE ATT&CK framework overview', category: 'ROADMAP', xp: 65 }
   ],
-  'TryHackMe / Labs': [
-    { title: 'Complete 1 THM room (any)', category: 'LABS', xp: 50, stat: 'SIGINT', bonus: 5 },
-    { title: 'Complete another THM room or Hack The Box intro', category: 'LABS', xp: 55, stat: 'SIGINT', bonus: 5 },
-    { title: 'Complete a TryHackMe learning path module', category: 'LABS', xp: 65, stat: 'SIGINT', bonus: 6 }
+  'WEB SECURITY': [
+    { title: 'OWASP Top 10: read and summarise', category: 'ROADMAP', xp: 50 },
+    { title: 'Burp Suite: intercept and repeat a request', category: 'LABS', xp: 55 },
+    { title: 'PortSwigger: SQL Injection lab', category: 'LABS', xp: 60 },
+    { title: 'PortSwigger: XSS lab', category: 'LABS', xp: 60 },
+    { title: 'PortSwigger: IDOR lab', category: 'LABS', xp: 65 },
+    { title: 'PortSwigger: SSRF lab', category: 'LABS', xp: 65 },
+    { title: 'PortSwigger: Auth bypass lab', category: 'LABS', xp: 65 },
+    { title: 'Write a 1-page VAPT mini-report', category: 'BUILD', xp: 75 }
   ],
-  'Interview Prep': [
-    { title: 'Study 5 SOC analyst interview Qs', category: 'COMMS', xp: 45, stat: 'COMMS', bonus: 4 },
-    { title: 'Study 5 AppSec interview Qs', category: 'COMMS', xp: 45, stat: 'COMMS', bonus: 4 },
-    { title: 'Write STAR story: IDOR finding from your internship', category: 'COMMS', xp: 55, stat: 'COMMS', bonus: 5 },
-    { title: 'Write STAR story: pick one offensive security tool you built', category: 'COMMS', xp: 55, stat: 'COMMS', bonus: 5 },
-    { title: 'Mock interview: answer 3 Qs out loud, record', category: 'COMMS', xp: 60, stat: 'COMMS', bonus: 6 },
-    { title: 'Review recording, write improvement notes', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 }
+  'TOOLS MASTERY': [
+    { title: 'Nmap: installation and basic scans', category: 'LABS', xp: 50 },
+    { title: 'Nmap: scripts and advanced usage', category: 'LABS', xp: 55 },
+    { title: 'Metasploit: basics and msfconsole', category: 'LABS', xp: 60 },
+    { title: 'Burp Suite: intercept, repeat, intruder', category: 'LABS', xp: 60 },
+    { title: 'Wireshark: capture filters and traffic analysis', category: 'LABS', xp: 60 },
+    { title: 'BloodHound: setup and AD enumeration', category: 'LABS', xp: 65 },
+    { title: 'Gobuster/ffuf: directory and subdomain fuzzing', category: 'LABS', xp: 65 },
+    { title: 'Hydra: basic credential brute forcing', category: 'LABS', xp: 65 },
+    { title: 'SQLmap: automated SQL injection', category: 'LABS', xp: 65 },
+    { title: 'Hashcat: password hash cracking basics', category: 'LABS', xp: 65 }
   ],
-  'AD Attack & Detection Lab': [
-    { title: 'AD Lab: setup and domain join (2h session)', category: 'BUILD', xp: 70, stat: 'ARSENAL', bonus: 7 },
-    { title: 'AD enumeration with BloodHound', category: 'LABS', xp: 70, stat: 'SIGINT', bonus: 7 },
-    { title: 'Kerberoasting attack walkthrough', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
-    { title: 'Pass-the-Hash and Pass-the-Ticket', category: 'LABS', xp: 75, stat: 'SIGINT', bonus: 7 },
-    { title: 'AD privilege escalation paths', category: 'LABS', xp: 80, stat: 'SIGINT', bonus: 8 },
-    { title: 'Build a detection rule for one attack', category: 'BUILD', xp: 80, stat: 'ARSENAL', bonus: 8 },
-    { title: 'Document findings in a lab report', category: 'BUILD', xp: 65, stat: 'ARSENAL', bonus: 6 }
+  'ACTIVE DIRECTORY': [
+    { title: 'AD concepts: Kerberos, LDAP, AD structure', category: 'ROADMAP', xp: 55 },
+    { title: 'AD Lab: setup and domain join (2h session)', category: 'BUILD', xp: 70 },
+    { title: 'AD enumeration with BloodHound', category: 'LABS', xp: 70 },
+    { title: 'Kerberoasting attack walkthrough', category: 'LABS', xp: 75 },
+    { title: 'Pass-the-Hash and Pass-the-Ticket', category: 'LABS', xp: 75 },
+    { title: 'AD privilege escalation paths', category: 'LABS', xp: 80 },
+    { title: 'Build a detection rule for one attack', category: 'BUILD', xp: 80 },
+    { title: 'Document findings in a lab report', category: 'BUILD', xp: 65 }
+  ],
+  'INTERVIEW PREP': [
+    { title: 'Study 5 SOC analyst interview Qs', category: 'COMMS', xp: 45 },
+    { title: 'Study 5 AppSec interview Qs', category: 'COMMS', xp: 45 },
+    { title: 'Write STAR story: IDOR finding from internship', category: 'COMMS', xp: 55 },
+    { title: 'Write STAR story: one offensive security tool built', category: 'COMMS', xp: 55 },
+    { title: 'Mock interview: answer 3 Qs out loud, record', category: 'COMMS', xp: 60 },
+    { title: 'Review recording, write improvement notes', category: 'COMMS', xp: 40 }
+  ],
+  'THM / LABS': [
+    { title: 'Complete 1 TryHackMe room', category: 'LABS', xp: 50 },
+    { title: 'Complete 1 HackTheBox intro machine', category: 'LABS', xp: 55 },
+    { title: 'Complete a TryHackMe learning path module', category: 'LABS', xp: 65 }
   ]
 };
 
 // Existing 3 Project Board cards
+// Existing 3 Project Board cards
 const PROJECTS = [
   {
-    name: 'THREAT INTEL CORRELATION ENGINE',
-    status: 'QUEUED',
-    focus: 'Design phase — architecture planning',
-    xp: 65,
-    active: false
-  },
-  {
-    name: 'CLOUD MISCONFIGURATION SCANNER (AWS/GCP)',
-    status: 'QUEUED',
-    focus: 'Research AWS IAM misconfig patterns',
-    xp: 65,
-    active: false
-  },
-  {
+    id: 'ad-lab',
     name: 'AD ATTACK & DETECTION LAB',
     status: 'ACTIVE',
     focus: 'Active Directory fundamentals — learning phase',
-    xp: 70,
-    active: true
+    dailyXP: 70,
+    tasks: [
+      // PHASE 1: SETUP
+      { id: 'ad-01', phase: 'SETUP', name: 'Install VirtualBox and configure host network settings', xp: 40 },
+      { id: 'ad-02', phase: 'SETUP', name: 'Download Windows Server 2019 ISO and create Domain Controller VM', xp: 45 },
+      { id: 'ad-03', phase: 'SETUP', name: 'Install and configure Active Directory Domain Services on DC', xp: 55 },
+      { id: 'ad-04', phase: 'SETUP', name: 'Create Windows 10 client VM and join it to the domain', xp: 50 },
+      { id: 'ad-05', phase: 'SETUP', name: 'Create test AD users, groups, and OUs for lab scenarios', xp: 45 },
+      // PHASE 2: ENUMERATION
+      { id: 'ad-06', phase: 'ENUMERATION', name: 'Run SharpHound collector and import data into BloodHound', xp: 65 },
+      { id: 'ad-07', phase: 'ENUMERATION', name: 'Identify shortest path to Domain Admin using BloodHound', xp: 65 },
+      { id: 'ad-08', phase: 'ENUMERATION', name: 'Enumerate SPNs for Kerberoastable accounts manually', xp: 60 },
+      // PHASE 3: ATTACKS
+      { id: 'ad-09', phase: 'ATTACKS', name: 'Execute Kerberoasting and crack extracted hashes with Hashcat', xp: 75 },
+      { id: 'ad-10', phase: 'ATTACKS', name: 'Execute AS-REP Roasting against accounts without pre-auth', xp: 75 },
+      { id: 'ad-11', phase: 'ATTACKS', name: 'Perform Pass-the-Hash attack using Mimikatz', xp: 80 },
+      { id: 'ad-12', phase: 'ATTACKS', name: 'Perform Pass-the-Ticket attack using stolen TGT', xp: 80 },
+      { id: 'ad-13', phase: 'ATTACKS', name: 'Execute DCSync attack to dump all domain hashes', xp: 85 },
+      { id: 'ad-14', phase: 'ATTACKS', name: 'Forge a Golden Ticket and verify persistence', xp: 85 },
+      // PHASE 4: DETECTION
+      { id: 'ad-15', phase: 'DETECTION', name: 'Enable advanced audit policies on Domain Controller', xp: 55 },
+      { id: 'ad-16', phase: 'DETECTION', name: 'Install Splunk and configure Windows Event log forwarding', xp: 65 },
+      { id: 'ad-17', phase: 'DETECTION', name: 'Write Splunk detection rule for Kerberoasting (Event ID 4769)', xp: 70 },
+      { id: 'ad-18', phase: 'DETECTION', name: 'Write detection rule for Pass-the-Hash (Event ID 4624 Type 3)', xp: 70 },
+      { id: 'ad-19', phase: 'DETECTION', name: 'Write detection rule for DCSync (Event ID 4662)', xp: 70 },
+      { id: 'ad-20', phase: 'DETECTION', name: 'Test all detection rules against simulated attacks', xp: 75 },
+      // PHASE 5: REPORT
+      { id: 'ad-21', phase: 'REPORT', name: 'Document all attack paths with screenshots and commands used', xp: 65 },
+      { id: 'ad-22', phase: 'REPORT', name: 'Write detection recommendations and remediation steps', xp: 60 },
+      { id: 'ad-23', phase: 'REPORT', name: 'Produce final lab report (PDF format)', xp: 70 },
+    ]
+  },
+  {
+    id: 'threat-intel',
+    name: 'THREAT INTEL CORRELATION ENGINE',
+    status: 'QUEUED',
+    focus: 'Design phase — architecture planning',
+    dailyXP: 65,
+    tasks: [
+      // PHASE 1: DESIGN
+      { id: 'ti-01', phase: 'DESIGN', name: 'Define system architecture and data flow diagram', xp: 45 },
+      { id: 'ti-02', phase: 'DESIGN', name: 'Research threat intel APIs: VirusTotal, AbuseIPDB, Shodan', xp: 50 },
+      { id: 'ti-03', phase: 'DESIGN', name: 'Design database schema for IOC storage and relationships', xp: 55 },
+      { id: 'ti-04', phase: 'DESIGN', name: 'Write technical specification document', xp: 50 },
+      // PHASE 2: BACKEND
+      { id: 'ti-05', phase: 'BACKEND', name: 'Setup project structure with FastAPI and SQLite', xp: 50 },
+      { id: 'ti-06', phase: 'BACKEND', name: 'Integrate VirusTotal API — IP, domain, and hash lookup', xp: 65 },
+      { id: 'ti-07', phase: 'BACKEND', name: 'Integrate AbuseIPDB API for IP reputation scoring', xp: 60 },
+      { id: 'ti-08', phase: 'BACKEND', name: 'Integrate Shodan API for host intelligence', xp: 60 },
+      { id: 'ti-09', phase: 'BACKEND', name: 'Build IOC correlation engine — link related indicators', xp: 80 },
+      { id: 'ti-10', phase: 'BACKEND', name: 'Build REST API endpoints for frontend consumption', xp: 65 },
+      // PHASE 3: FRONTEND
+      { id: 'ti-11', phase: 'FRONTEND', name: 'Build IOC search interface in React', xp: 60 },
+      { id: 'ti-12', phase: 'FRONTEND', name: 'Build correlation graph visualization (D3.js or Recharts)', xp: 75 },
+      { id: 'ti-13', phase: 'FRONTEND', name: 'Build threat report generation and export to PDF', xp: 70 },
+      // PHASE 4: SHIP
+      { id: 'ti-14', phase: 'SHIP', name: 'Write unit tests for correlation engine', xp: 60 },
+      { id: 'ti-15', phase: 'SHIP', name: 'Containerize with Docker and write docker-compose', xp: 65 },
+      { id: 'ti-16', phase: 'SHIP', name: 'Deploy to cloud and write README with demo screenshots', xp: 65 },
+    ]
+  },
+  {
+    id: 'cloud-scanner',
+    name: 'CLOUD MISCONFIGURATION SCANNER (AWS/GCP)',
+    status: 'QUEUED',
+    focus: 'Research AWS IAM misconfig patterns',
+    dailyXP: 65,
+    tasks: [
+      // PHASE 1: RESEARCH
+      { id: 'cs-01', phase: 'RESEARCH', name: 'Study AWS IAM misconfig patterns: wildcard policies, privilege escalation', xp: 55 },
+      { id: 'cs-02', phase: 'RESEARCH', name: 'Study GCP common misconfigs: IAM bindings, firewall rules', xp: 55 },
+      { id: 'cs-03', phase: 'RESEARCH', name: 'Analyse existing tools: ScoutSuite, Prowler, CloudMapper', xp: 50 },
+      { id: 'cs-04', phase: 'RESEARCH', name: 'Define scan rules and severity scoring system', xp: 50 },
+      // PHASE 2: BUILD AWS
+      { id: 'cs-05', phase: 'BUILD-AWS', name: 'Setup project CLI structure with Python argparse', xp: 50 },
+      { id: 'cs-06', phase: 'BUILD-AWS', name: 'AWS scanner: detect public S3 buckets', xp: 65 },
+      { id: 'cs-07', phase: 'BUILD-AWS', name: 'AWS scanner: detect overpermissive IAM policies (*:*)', xp: 70 },
+      { id: 'cs-08', phase: 'BUILD-AWS', name: 'AWS scanner: detect security groups open to 0.0.0.0/0', xp: 65 },
+      { id: 'cs-09', phase: 'BUILD-AWS', name: 'AWS scanner: check CloudTrail and GuardDuty are enabled', xp: 60 },
+      // PHASE 3: BUILD GCP
+      { id: 'cs-10', phase: 'BUILD-GCP', name: 'GCP scanner: check IAM bindings for allUsers or allAuthenticatedUsers', xp: 65 },
+      { id: 'cs-11', phase: 'BUILD-GCP', name: 'GCP scanner: detect firewall rules allowing broad ingress', xp: 65 },
+      { id: 'cs-12', phase: 'BUILD-GCP', name: 'GCP scanner: check Cloud Storage bucket permissions', xp: 60 },
+      // PHASE 4: SHIP
+      { id: 'cs-13', phase: 'SHIP', name: 'Build HTML + JSON report generator with severity ratings', xp: 70 },
+      { id: 'cs-14', phase: 'SHIP', name: 'Test scanner against AWS free tier sandbox account', xp: 65 },
+      { id: 'cs-15', phase: 'SHIP', name: 'Package as installable CLI tool and publish to GitHub', xp: 65 },
+      { id: 'cs-16', phase: 'SHIP', name: 'Write full README with usage examples and screenshots', xp: 55 },
+    ]
   }
 ];
 
@@ -135,18 +238,37 @@ const getYesterdayString = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+const getISOWeekString = () => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + 4 - (d.getDay() || 7));
+  const yearStart = new Date(d.getFullYear(), 0, 1);
+  const weekNo = Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+  return `${d.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+};
+
+const getStageLabel = (pct) => {
+  if (pct <= 25) return 'Foundation Building';
+  if (pct <= 50) return 'Skills Acquisition';
+  if (pct <= 75) return 'Active Hunting';
+  if (pct <= 99) return 'Final Approach';
+  return 'OBJECTIVE COMPLETE';
+};
+
 // Day Transition & Initial Telemetry State Setup
 const initializeTelemetry = () => {
   const today = getTodayString();
   const lastActiveDate = storage.getItem('operator_completion_date');
   
   let chainProgress = {
-    'Networking Fundamentals': 0,
-    'Active Directory': 0,
-    'Web AppSec': 0,
-    'TryHackMe / Labs': 0,
-    'Interview Prep': 0,
-    'AD Attack & Detection Lab': 0
+    'NETWORKING': 0,
+    'LINUX': 0,
+    'SOC OPERATIONS': 0,
+    'WEB SECURITY': 0,
+    'TOOLS MASTERY': 0,
+    'ACTIVE DIRECTORY': 0,
+    'INTERVIEW PREP': 0,
+    'THM / LABS': 0
   };
   
   const savedChainProg = storage.getItem('chainProgress');
@@ -167,7 +289,9 @@ const initializeTelemetry = () => {
     if (yesterdayStateRaw) {
       try {
         const parsed = JSON.parse(yesterdayStateRaw);
-        yesterdayCompletedTaskIds = parsed.completedTaskIds || [];
+        if (parsed && Array.isArray(parsed.completedTaskIds)) {
+          yesterdayCompletedTaskIds = parsed.completedTaskIds;
+        }
       } catch (err) {
         console.error("Failed to parse yesterday state", err);
       }
@@ -179,7 +303,10 @@ const initializeTelemetry = () => {
     let yesterdayTimes = {};
     if (yesterdayTimesRaw) {
       try {
-        yesterdayTimes = JSON.parse(yesterdayTimesRaw);
+        const parsedTimes = JSON.parse(yesterdayTimesRaw);
+        if (parsedTimes && typeof parsedTimes === 'object') {
+          yesterdayTimes = parsedTimes;
+        }
       } catch (err) {
         console.error("Failed to parse yesterday completion times", err);
       }
@@ -243,6 +370,11 @@ const initializeTelemetry = () => {
     });
     storage.setItem('chainProgress', JSON.stringify(chainProgress));
 
+    // Clean up yesterday's completed project tasks
+    ['ad-lab', 'threat-intel', 'cloud-scanner'].forEach(id => {
+      storage.removeItem(`projectCompleted:${id}`);
+    });
+
     // Clean up auxiliary yesterday times
     storage.removeItem(yesterdayTimesKey);
   }
@@ -255,7 +387,13 @@ const initializeTelemetry = () => {
   const savedState = storage.getItem(`state:${today}`);
   if (savedState) {
     try {
-      dailyState = JSON.parse(savedState);
+      const parsed = JSON.parse(savedState);
+      if (parsed && typeof parsed === 'object') {
+        dailyState = {
+          completedTaskIds: Array.isArray(parsed.completedTaskIds) ? parsed.completedTaskIds : [],
+          unlockedChainSteps: (parsed.unlockedChainSteps && typeof parsed.unlockedChainSteps === 'object') ? parsed.unlockedChainSteps : {}
+        };
+      }
     } catch (err) {
       console.error("Failed to parse today daily state", err);
     }
@@ -288,7 +426,15 @@ export default function App() {
     let loadedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
     if (saved) {
       try {
-        loadedProfile = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          loadedProfile = {
+            level: typeof parsed.level === 'number' ? parsed.level : 1,
+            totalXp: typeof parsed.totalXp === 'number' ? parsed.totalXp : 0,
+            streak: typeof parsed.streak === 'number' ? parsed.streak : 0,
+            lastActiveDate: typeof parsed.lastActiveDate === 'string' ? parsed.lastActiveDate : ''
+          };
+        }
       } catch (err) {
         console.error("Failed to parse operator profile", err);
       }
@@ -320,6 +466,335 @@ export default function App() {
   
   // Permanent chain step progress
   const [chainProgress, setChainProgress] = useState(telemetry.chainProgress);
+
+  // Project status state
+  const [projectStatus, setProjectStatus] = useState(() => {
+    const saved = storage.getItem('projectStatus');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch {}
+    }
+    return { 'ad-lab': 'ACTIVE', 'threat-intel': 'QUEUED', 'cloud-scanner': 'QUEUED' };
+  });
+
+  // Project progress state
+  const [projectProgress, setProjectProgress] = useState(() => {
+    const saved = storage.getItem('projectProgress');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (parsed && typeof parsed === 'object') {
+          return {
+            'ad-lab': typeof parsed['ad-lab'] === 'number' ? parsed['ad-lab'] : 3,
+            'threat-intel': typeof parsed['threat-intel'] === 'number' ? parsed['threat-intel'] : 0,
+            'cloud-scanner': typeof parsed['cloud-scanner'] === 'number' ? parsed['cloud-scanner'] : 0
+          };
+        }
+      } catch {}
+    }
+    return { 'ad-lab': 3, 'threat-intel': 0, 'cloud-scanner': 0 };
+  });
+
+  // Project completed tasks for today's session
+  const [projectCompletedTasks, setProjectCompletedTasks] = useState(() => {
+    const completed = {};
+    PROJECTS.forEach(proj => {
+      const saved = storage.getItem(`projectCompleted:${proj.id}`);
+      if (saved) {
+        try {
+          completed[proj.id] = JSON.parse(saved) || [];
+        } catch {
+          completed[proj.id] = [];
+        }
+      } else {
+        completed[proj.id] = [];
+      }
+    });
+    return completed;
+  });
+
+  // Collapsible completed projects control
+  const [isCompletedProjectsExpanded, setIsCompletedProjectsExpanded] = useState(false);
+
+  // Accomplished project modal control
+  const [completedProjectModal, setCompletedProjectModal] = useState({ show: false, projectName: '', totalXp: 0 });
+
+  // Active project calculation
+  const activeProject = useMemo(() => {
+    return PROJECTS.find(p => projectStatus[p.id] === 'ACTIVE');
+  }, [projectStatus]);
+
+  // Done projects list
+  const doneProjects = useMemo(() => {
+    return PROJECTS.filter(p => projectStatus[p.id] === 'DONE');
+  }, [projectStatus]);
+
+  // Active or Queued projects list
+  const activeOrQueuedProjects = useMemo(() => {
+    return PROJECTS.filter(p => projectStatus[p.id] !== 'DONE');
+  }, [projectStatus]);
+
+  // Rendered Project Ops tasks
+  const renderedOpsTasks = useMemo(() => {
+    if (!activeProject) return [];
+    const activeProjProg = projectProgress[activeProject.id] || 0;
+    const activeProjCompletedToday = projectCompletedTasks[activeProject.id] || [];
+    const opsTasks = [];
+    
+    // Calculate starting index of tasks completed today
+    const startIndex = Math.max(0, activeProjProg - activeProjCompletedToday.length);
+    
+    // Add completed today tasks
+    for (let i = startIndex; i < activeProjProg; i++) {
+      if (activeProject.tasks[i]) {
+        opsTasks.push({
+          task: activeProject.tasks[i],
+          completed: true
+        });
+      }
+    }
+    
+    // Add single active task if not fully complete
+    if (activeProjProg < activeProject.tasks.length) {
+      opsTasks.push({
+        task: activeProject.tasks[activeProjProg],
+        completed: false
+      });
+    }
+    
+    return opsTasks;
+  }, [activeProject, projectProgress, projectCompletedTasks]);
+
+  // Compute RPG stats dynamically based on daily completedTaskIds and last 7 days of logs
+  const computedStats = useMemo(() => {
+    const today = getTodayString();
+    
+    // Count completions of FIXED_TASKS in last 7 days:
+    const counts7Days = {};
+    FIXED_TASKS.forEach(t => {
+      counts7Days[t.id] = 0;
+    });
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      
+      if (dateStr === today) {
+        dailyState.completedTaskIds.forEach(id => {
+          if (id.startsWith('fixed:')) {
+            counts7Days[id] = (counts7Days[id] || 0) + 1;
+          }
+        });
+      } else {
+        const logsRaw = storage.getItem(`log:${dateStr}`);
+        if (logsRaw) {
+          try {
+            const logs = JSON.parse(logsRaw);
+            if (Array.isArray(logs)) {
+              logs.forEach(log => {
+                if (log.type === 'completed') {
+                  const fixedTask = FIXED_TASKS.find(t => t.title === log.taskName);
+                  if (fixedTask) {
+                    counts7Days[fixedTask.id] = (counts7Days[fixedTask.id] || 0) + 1;
+                  }
+                }
+              });
+            }
+          } catch {}
+        }
+      }
+    }
+
+    // 1. SIGINT — Technical knowledge
+    // = (total ROADMAP + LABS chain steps permanently completed across all chains) / (total ROADMAP + LABS chain steps defined) × 100
+    let totalRoadmapLabsDefined = 0;
+    let totalRoadmapLabsCompleted = 0;
+    Object.keys(CHAINS).forEach(chainName => {
+      CHAINS[chainName].forEach(step => {
+        if (step.category === 'ROADMAP' || step.category === 'LABS') {
+          totalRoadmapLabsDefined++;
+        }
+      });
+      const completedCount = chainProgress[chainName] || 0;
+      for (let i = 0; i < completedCount; i++) {
+        const step = CHAINS[chainName][i];
+        if (step && (step.category === 'ROADMAP' || step.category === 'LABS')) {
+          totalRoadmapLabsCompleted++;
+        }
+      }
+    });
+    const sigint = totalRoadmapLabsDefined > 0 ? Math.min(100, Math.round((totalRoadmapLabsCompleted / totalRoadmapLabsDefined) * 100)) : 0;
+
+    // 2. OPS — Execution speed
+    // = (OPS-tagged fixed tasks completed in last 7 days) / (OPS-tagged fixed tasks × 7) × 100
+    const opsTasks = FIXED_TASKS.filter(t => t.category === 'OPS');
+    const opsCompleted = opsTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
+    const ops = opsTasks.length > 0 ? Math.min(100, Math.round((opsCompleted / (opsTasks.length * 7)) * 100)) : 0;
+
+    // 3. ARSENAL — Active projects
+    // = (sum of projectProgress[id] across all projects) / (sum of total tasks across all projects) × 100
+    let totalProjectTasks = 0;
+    let totalProjectProgress = 0;
+    PROJECTS.forEach(proj => {
+      totalProjectTasks += proj.tasks.length;
+      totalProjectProgress += projectProgress[proj.id] || 0;
+    });
+    const arsenal = totalProjectTasks > 0 ? Math.min(100, Math.round((totalProjectProgress / totalProjectTasks) * 100)) : 0;
+
+    // 4. COMMS — Interview readiness
+    // = (COMMS chain steps completed + COMMS fixed tasks completed last 7 days) / (total COMMS steps + COMMS fixed tasks × 7) × 100
+    let totalCommsStepsDefined = 0;
+    let totalCommsStepsCompleted = 0;
+    Object.keys(CHAINS).forEach(chainName => {
+      CHAINS[chainName].forEach(step => {
+        if (step.category === 'COMMS') {
+          totalCommsStepsDefined++;
+        }
+      });
+      const completedCount = chainProgress[chainName] || 0;
+      for (let i = 0; i < completedCount; i++) {
+        const step = CHAINS[chainName][i];
+        if (step && step.category === 'COMMS') {
+          totalCommsStepsCompleted++;
+        }
+      }
+    });
+    const commsFixedTasks = FIXED_TASKS.filter(t => t.category === 'COMMS');
+    const commsFixedCompleted = commsFixedTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
+    const comms = (totalCommsStepsDefined + commsFixedTasks.length * 7) > 0 
+      ? Math.min(100, Math.round(((totalCommsStepsCompleted + commsFixedCompleted) / (totalCommsStepsDefined + commsFixedTasks.length * 7)) * 100)) 
+      : 0;
+
+    // 5. DISCIPLINE — Schedule adherence
+    // = (DISCIPLINE fixed tasks completed last 7 days) / (DISCIPLINE fixed tasks × 7) × 100
+    const disciplineTasks = FIXED_TASKS.filter(t => t.category === 'DISCIPLINE');
+    const disciplineCompleted = disciplineTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
+    const discipline = disciplineTasks.length > 0 ? Math.min(100, Math.round((disciplineCompleted / (disciplineTasks.length * 7)) * 100)) : 0;
+
+    // 6. ENDURANCE — Physical/mental
+    // = (PHYSICAL + SOCIAL fixed tasks completed last 7 days) / ((PHYSICAL + SOCIAL fixed tasks) × 7) × 100
+    const enduranceTasks = FIXED_TASKS.filter(t => t.category === 'PHYSICAL' || t.category === 'SOCIAL');
+    const enduranceCompleted = enduranceTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
+    const endurance = enduranceTasks.length > 0 ? Math.min(100, Math.round((enduranceCompleted / (enduranceTasks.length * 7)) * 100)) : 0;
+
+    return {
+      sigint,
+      ops,
+      arsenal,
+      comms,
+      discipline,
+      endurance
+    };
+  }, [dailyState.completedTaskIds, chainProgress]);
+
+  // Level computation from XP
+  const levelProgress = useMemo(() => {
+    const totalXp = profile.totalXp;
+    const currentLevel = Math.floor(totalXp / 200) + 1;
+    const currentLevelXp = totalXp % 200;
+    return {
+      level: currentLevel,
+      xpInLevel: currentLevelXp,
+      pct: (currentLevelXp / 200) * 100
+    };
+  }, [profile.totalXp]);
+
+  // Main Objective dynamic readiness calculation
+  const mainObjectiveProgress = useMemo(() => {
+    // 1. Skills learned (35% weight): SIGINT stat
+    const sigintContribution = computedStats.sigint * 0.35;
+
+    // 2. Applications sent (30% weight): Count of Apply to roles completions in all logs (target: 35)
+    let applyRolesCount = 0;
+    if (dailyState.completedTaskIds.includes('fixed:apply_roles')) {
+      applyRolesCount++;
+    }
+    const today = getTodayString();
+    const allKeys = [];
+    try {
+      for (let i = 0; i < storage.length; i++) {
+        const k = storage.key(i);
+        if (k && k.startsWith('log:')) {
+          allKeys.push(k);
+        }
+      }
+    } catch {
+      Object.keys(storage).forEach(k => {
+        if (k.startsWith('log:')) {
+          allKeys.push(k);
+        }
+      });
+    }
+    allKeys.forEach(k => {
+      if (k === `log:${today}`) return;
+      const raw = storage.getItem(k);
+      if (raw) {
+        try {
+          const logs = JSON.parse(raw);
+          if (Array.isArray(logs)) {
+            logs.forEach(entry => {
+              if (entry.type === 'completed' && entry.taskName === 'Apply to 5 roles (Naukri/LinkedIn)') {
+                applyRolesCount++;
+              }
+            });
+          }
+        } catch {}
+      }
+    });
+    const applyRolesPct = Math.min(100, Math.round((applyRolesCount / 35) * 100));
+    const applyRolesContribution = applyRolesPct * 0.30;
+
+    // 3. Interview readiness (20% weight): COMMS stat
+    const commsContribution = computedStats.comms * 0.20;
+
+    // 4. Lab hours (15% weight): Count of LABS + BUILD completions in all logs (target: 40)
+    let labsBuildCount = 0;
+    dailyState.completedTaskIds.forEach(id => {
+      if (id.startsWith('chain:')) {
+        const parts = id.split(':');
+        if (parts.length === 3) {
+          const chainName = parts[1];
+          const stepIdx = parseInt(parts[2], 10);
+          const chain = CHAINS[chainName];
+          if (chain && chain[stepIdx]) {
+            const task = chain[stepIdx];
+            if (task.category === 'LABS' || task.category === 'BUILD') {
+              labsBuildCount++;
+            }
+          }
+        }
+      } else {
+        const task = FIXED_TASKS.find(t => t.id === id);
+        if (task && (task.category === 'LABS' || task.category === 'BUILD')) {
+          labsBuildCount++;
+        }
+      }
+    });
+    allKeys.forEach(k => {
+      if (k === `log:${today}`) return;
+      const raw = storage.getItem(k);
+      if (raw) {
+        try {
+          const logs = JSON.parse(raw);
+          if (Array.isArray(logs)) {
+            logs.forEach(entry => {
+              if (entry.type === 'completed' && (entry.tag === 'LABS' || entry.tag === 'BUILD')) {
+                labsBuildCount++;
+              }
+            });
+          }
+        } catch {}
+      }
+    });
+    const labsBuildPct = Math.min(100, Math.round((labsBuildCount / 40) * 100));
+    const labsBuildContribution = labsBuildPct * 0.15;
+
+    const totalPct = Math.round(sigintContribution + applyRolesContribution + commsContribution + labsBuildContribution);
+    return Math.min(100, totalPct);
+  }, [computedStats, dailyState.completedTaskIds]);
   
   // Particle effects for checked item XP gains
   const [particles, setParticles] = useState([]);
@@ -340,6 +815,10 @@ export default function App() {
   const [flavors, setFlavors] = useState({});
   const [isFlavorLoading, setIsFlavorLoading] = useState(false);
   const [unlockedTasks, setUnlockedTasks] = useState([]);
+  const [isSkillMapExpanded, setIsSkillMapExpanded] = useState(true);
+  const [isLifeMetricsExpanded, setIsLifeMetricsExpanded] = useState(true);
+  const [weeklyReview, setWeeklyReview] = useState(null);
+  const [isWeeklyReviewDismissed, setIsWeeklyReviewDismissed] = useState(false);
 
   // Missed task penalty banner state
   const [showPenaltyBanner, setShowPenaltyBanner] = useState(() => {
@@ -352,7 +831,7 @@ export default function App() {
     if (yesterdayLogsRaw) {
       try {
         const logs = JSON.parse(yesterdayLogsRaw);
-        return logs.some(log => log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0);
+        return Array.isArray(logs) && logs.some(log => log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0);
       } catch {
         return false;
       }
@@ -428,6 +907,170 @@ export default function App() {
     }
   }, [isAuthenticated]);
 
+  // Helper to retrieve completed fixed task counts for the last 30 days
+  const getCompletedCountsForLast30Days = () => {
+    const today = getTodayString();
+    const counts = {};
+    
+    FIXED_TASKS.forEach(t => {
+      counts[t.id] = 0;
+    });
+
+    for (let i = 0; i < 30; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      
+      if (dateStr === today) {
+        dailyState.completedTaskIds.forEach(id => {
+          if (id.startsWith('fixed:')) {
+            counts[id] = (counts[id] || 0) + 1;
+          }
+        });
+      } else {
+        const logsRaw = storage.getItem(`log:${dateStr}`);
+        if (logsRaw) {
+          try {
+            const logs = JSON.parse(logsRaw);
+            if (Array.isArray(logs)) {
+              logs.forEach(log => {
+                if (log.type === 'completed') {
+                  const fixedTask = FIXED_TASKS.find(t => t.title === log.taskName);
+                  if (fixedTask) {
+                    counts[fixedTask.id] = (counts[fixedTask.id] || 0) + 1;
+                  }
+                }
+              });
+            }
+          } catch {}
+        }
+      }
+    }
+    return counts;
+  };
+
+  // Helper to format the 30-day snapshot range string
+  const get30DayRangeString = () => {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - 29);
+    
+    const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return `${formatDate(start)} TO ${formatDate(end)}`;
+  };
+
+  // Automated Weekly AI Review background fetch
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    
+    const isoWeek = getISOWeekString();
+    const storedReview = storage.getItem(`weeklyReview:${isoWeek}`);
+    const dismissed = storage.getItem(`dismissedReview:${isoWeek}`) === 'true';
+    
+    if (storedReview) {
+      try {
+        const parsed = JSON.parse(storedReview);
+        if (parsed && typeof parsed === 'object') {
+          setWeeklyReview(parsed);
+          setIsWeeklyReviewDismissed(dismissed);
+          return;
+        }
+      } catch (e) {
+        console.error("Failed to parse stored weekly review", e);
+      }
+    }
+
+    const todayDay = new Date().getDay(); // 1 = Monday
+    const isMonday = todayDay === 1;
+    
+    const lastReviewDateStr = storage.getItem('last_weekly_review_date');
+    let moreThan7Days = false;
+    if (lastReviewDateStr) {
+      const lastDate = new Date(lastReviewDateStr);
+      const diffTime = Math.abs(new Date() - lastDate);
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      if (diffDays > 7) {
+        moreThan7Days = true;
+      }
+    } else {
+      moreThan7Days = true;
+    }
+
+    if (isMonday || moreThan7Days) {
+      // Gather last 7 days of logs (completed + missed)
+      const last7DaysLogs = [];
+      const today = getTodayString();
+      for (let i = 0; i < 7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        
+        if (dateStr === today) {
+          FIXED_TASKS.forEach(task => {
+            const isCompleted = dailyState.completedTaskIds.includes(task.id);
+            last7DaysLogs.push({
+              taskName: task.title,
+              tag: task.category,
+              type: isCompleted ? 'completed' : 'missed',
+              date: dateStr
+            });
+          });
+          dailyState.completedTaskIds.forEach(id => {
+            if (id.startsWith('chain:')) {
+              const parts = id.split(':');
+              if (parts.length === 3) {
+                const chainName = parts[1];
+                const stepIdx = parseInt(parts[2], 10);
+                const chain = CHAINS[chainName];
+                if (chain && chain[stepIdx]) {
+                  last7DaysLogs.push({
+                    taskName: chain[stepIdx].title,
+                    tag: chain[stepIdx].category,
+                    type: 'completed',
+                    date: dateStr
+                  });
+                }
+              }
+            }
+          });
+        } else {
+          const rawLogs = storage.getItem(`log:${dateStr}`);
+          if (rawLogs) {
+            try {
+              const parsed = JSON.parse(rawLogs);
+              if (Array.isArray(parsed)) {
+                parsed.forEach(entry => {
+                  last7DaysLogs.push({
+                    taskName: entry.taskName,
+                    tag: entry.tag,
+                    type: entry.type,
+                    date: dateStr
+                  });
+                });
+              }
+            } catch {}
+          }
+        }
+      }
+
+      const payload = {
+        logs: last7DaysLogs,
+        stats: computedStats,
+        chainProgress,
+        mainObjectiveProgress
+      };
+
+      fetchWeeklyReview(payload).then(result => {
+        if (result && typeof result === 'object') {
+          storage.setItem(`weeklyReview:${isoWeek}`, JSON.stringify(result));
+          storage.setItem('last_weekly_review_date', new Date().toISOString());
+          setWeeklyReview(result);
+          setIsWeeklyReviewDismissed(false);
+        }
+      });
+    }
+  }, [isAuthenticated, computedStats, chainProgress, mainObjectiveProgress]);
+
   // Push telemetry packages to Serverless KV Store
   const saveProgressToServer = (password, stateToday, prof, chainProg, timesToday) => {
     setSyncLoading(true);
@@ -460,6 +1103,9 @@ export default function App() {
       }
     });
 
+    const statusToSync = storage.getItem('projectStatus') ? JSON.parse(storage.getItem('projectStatus')) : {};
+    const progressToSync = storage.getItem('projectProgress') ? JSON.parse(storage.getItem('projectProgress')) : {};
+
     fetch('/api/progress', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -473,7 +1119,9 @@ export default function App() {
           logs: logsToSync,
           debriefs: debriefsToSync,
           dayClosed: dayClosedToSync,
-          flavors: flavorsToSync
+          flavors: flavorsToSync,
+          projectStatus: statusToSync,
+          projectProgress: progressToSync
         }
       })
     })
@@ -518,25 +1166,33 @@ export default function App() {
           let resolvedState = { completedTaskIds: [], unlockedChainSteps: {} };
           if (remoteData.profile && remoteData.profile.lastActiveDate === today) {
             if (remoteData.stateToday) {
-              resolvedState = remoteData.stateToday;
+              resolvedState = {
+                completedTaskIds: Array.isArray(remoteData.stateToday.completedTaskIds) ? remoteData.stateToday.completedTaskIds : [],
+                unlockedChainSteps: (remoteData.stateToday.unlockedChainSteps && typeof remoteData.stateToday.unlockedChainSteps === 'object') ? remoteData.stateToday.unlockedChainSteps : {}
+              };
             }
           }
           
           // Restore chainProgress
           let resolvedChainProgress = {
-            'Networking Fundamentals': 0,
-            'Active Directory': 0,
-            'Web AppSec': 0,
-            'TryHackMe / Labs': 0,
-            'Interview Prep': 0,
-            'AD Attack & Detection Lab': 0
+            'NETWORKING': 0,
+            'LINUX': 0,
+            'SOC OPERATIONS': 0,
+            'WEB SECURITY': 0,
+            'TOOLS MASTERY': 0,
+            'ACTIVE DIRECTORY': 0,
+            'INTERVIEW PREP': 0,
+            'THM / LABS': 0
           };
           
           let localChainProgress = {};
           const localSaved = storage.getItem('chainProgress');
           if (localSaved) {
             try {
-              localChainProgress = JSON.parse(localSaved);
+              const parsed = JSON.parse(localSaved);
+              if (parsed && typeof parsed === 'object') {
+                localChainProgress = parsed;
+              }
             } catch (e) {
               console.error("Failed to parse local chainProgress", e);
             }
@@ -550,7 +1206,7 @@ export default function App() {
           
           // Restore completion times
           let resolvedCompletionTimes = {};
-          if (remoteData.completionTimesToday) {
+          if (remoteData.completionTimesToday && typeof remoteData.completionTimesToday === 'object') {
             resolvedCompletionTimes = remoteData.completionTimesToday;
           }
           storage.setItem(`completion_times:${today}`, JSON.stringify(resolvedCompletionTimes));
@@ -583,6 +1239,22 @@ export default function App() {
             });
           }
           
+          // Restore projectStatus
+          let resolvedProjectStatus = { 'ad-lab': 'ACTIVE', 'threat-intel': 'QUEUED', 'cloud-scanner': 'QUEUED' };
+          if (remoteData.projectStatus && typeof remoteData.projectStatus === 'object') {
+            resolvedProjectStatus = remoteData.projectStatus;
+          }
+          setProjectStatus(resolvedProjectStatus);
+          storage.setItem('projectStatus', JSON.stringify(resolvedProjectStatus));
+
+          // Restore projectProgress
+          let resolvedProjectProgress = { 'ad-lab': 3, 'threat-intel': 0, 'cloud-scanner': 0 };
+          if (remoteData.projectProgress && typeof remoteData.projectProgress === 'object') {
+            resolvedProjectProgress = remoteData.projectProgress;
+          }
+          setProjectProgress(resolvedProjectProgress);
+          storage.setItem('projectProgress', JSON.stringify(resolvedProjectProgress));
+
           setDailyState(resolvedState);
           storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
           
@@ -599,7 +1271,10 @@ export default function App() {
           const todayFlavorsRaw = storage.getItem(`flavor:${today}`);
           if (todayFlavorsRaw) {
             try {
-              setFlavors(JSON.parse(todayFlavorsRaw));
+              const parsed = JSON.parse(todayFlavorsRaw);
+              if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                setFlavors(parsed);
+              }
             } catch {}
           }
         } else {
@@ -736,7 +1411,18 @@ export default function App() {
           taskName: task.title,
           tag: task.category,
           xp: task.xp,
-          completedAt: isCompleted ? (storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`))[task.id] || new Date().toISOString() : new Date().toISOString()) : null,
+          completedAt: isCompleted ? (() => {
+            const timesRaw = storage.getItem(`completion_times:${today}`);
+            if (timesRaw) {
+              try {
+                const parsed = JSON.parse(timesRaw);
+                if (parsed && typeof parsed === 'object') {
+                  return parsed[task.id] || new Date().toISOString();
+                }
+              } catch {}
+            }
+            return new Date().toISOString();
+          })() : null,
           type: isCompleted ? 'completed' : 'missed',
           ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
         });
@@ -756,7 +1442,18 @@ export default function App() {
                 taskName: stepTask.title,
                 tag: stepTask.category,
                 xp: stepTask.xp,
-                completedAt: storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`))[id] || new Date().toISOString() : new Date().toISOString(),
+                completedAt: (() => {
+                  const timesRaw = storage.getItem(`completion_times:${today}`);
+                  if (timesRaw) {
+                    try {
+                      const parsed = JSON.parse(timesRaw);
+                      if (parsed && typeof parsed === 'object') {
+                        return parsed[id] || new Date().toISOString();
+                      }
+                    } catch {}
+                  }
+                  return new Date().toISOString();
+                })(),
                 type: 'completed'
               });
             }
@@ -773,7 +1470,140 @@ export default function App() {
       // Also trigger a KV sync to backup today's new logs and closure status
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
-        saveProgressToServer(activePasscode, dailyState, profile, chainProgress, storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`)) : {});
+        let timesObj = {};
+        const timesRaw = storage.getItem(`completion_times:${today}`);
+        if (timesRaw) {
+          try {
+            const parsed = JSON.parse(timesRaw);
+            if (parsed && typeof parsed === 'object') {
+              timesObj = parsed;
+            }
+          } catch {}
+        }
+        saveProgressToServer(activePasscode, dailyState, profile, chainProgress, timesObj);
+      }
+    }
+  };
+
+  // Change project status handler
+  const handleChangeProjectStatus = (projId, newStatus) => {
+    let updatedStatus = { ...projectStatus };
+    if (newStatus === 'ACTIVE') {
+      // Set any previously ACTIVE project to ON HOLD
+      Object.keys(updatedStatus).forEach(id => {
+        if (updatedStatus[id] === 'ACTIVE') {
+          updatedStatus[id] = 'ON HOLD';
+        }
+      });
+    }
+    updatedStatus[projId] = newStatus;
+    setProjectStatus(updatedStatus);
+    storage.setItem('projectStatus', JSON.stringify(updatedStatus));
+
+    // Also trigger server sync
+    const activePasscode = passcode || storage.getItem('operator_passcode');
+    if (activePasscode) {
+      saveProgressToServer(activePasscode, dailyState, profile, chainProgress, storage.getItem(`completion_times:${getTodayString()}`) ? JSON.parse(storage.getItem(`completion_times:${getTodayString()}`)) : {});
+    }
+  };
+
+  // Toggle project task completion
+  const handleToggleProjectTask = (projId, taskId, xpReward, e) => {
+    if (isDayClosed) return;
+    const today = getTodayString();
+    
+    const currentProgressVal = projectProgress[projId] || 0;
+    const completedToday = projectCompletedTasks[projId] || [];
+    const isCompleted = completedToday.includes(taskId);
+    
+    let nextCompleted = [...completedToday];
+    let nextProgressVal = currentProgressVal;
+    
+    // Handle particles
+    if (!isCompleted && e) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top;
+      const newParticle = {
+        id: ++particleCounter,
+        xp: xpReward,
+        x: x,
+        y: y
+      };
+      setParticles(prev => [...prev, newParticle]);
+      setTimeout(() => {
+        setParticles(prev => prev.filter(p => p.id !== newParticle.id));
+      }, 1000);
+    }
+
+    if (!isCompleted) {
+      // Mark task as completed today
+      nextCompleted.push(taskId);
+      nextProgressVal = currentProgressVal + 1;
+      
+      // Trigger flash animation for the NEXT task
+      const project = PROJECTS.find(p => p.id === projId);
+      if (project && nextProgressVal < project.tasks.length) {
+        const nextTaskId = project.tasks[nextProgressVal].id;
+        setJustUnlockedStepId(nextTaskId);
+      }
+    } else {
+      // Uncheck task:
+      // Remove it from nextCompleted, and decrement progress.
+      nextCompleted = nextCompleted.filter(id => id !== taskId);
+      nextProgressVal = Math.max(0, currentProgressVal - 1);
+    }
+    
+    // Save to storage & update state
+    const updatedCompleted = { ...projectCompletedTasks, [projId]: nextCompleted };
+    setProjectCompletedTasks(updatedCompleted);
+    storage.setItem(`projectCompleted:${projId}`, JSON.stringify(nextCompleted));
+    
+    const updatedProgress = { ...projectProgress, [projId]: nextProgressVal };
+    setProjectProgress(updatedProgress);
+    storage.setItem('projectProgress', JSON.stringify(updatedProgress));
+    
+    // Add XP to profile
+    setProfile(prev => {
+      let newTotalXp = prev.totalXp + (isCompleted ? -xpReward : xpReward);
+      if (newTotalXp < 0) newTotalXp = 0;
+      const updatedLevel = Math.floor(newTotalXp / 200) + 1;
+      const newProfile = {
+        ...prev,
+        level: updatedLevel,
+        totalXp: newTotalXp
+      };
+      storage.setItem('operator_profile', JSON.stringify(newProfile));
+      
+      // Sync to server
+      const activePasscode = passcode || storage.getItem('operator_passcode');
+      if (activePasscode) {
+        saveProgressToServer(activePasscode, dailyState, newProfile, chainProgress, storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`)) : {});
+      }
+      return newProfile;
+    });
+
+    // Check if all tasks in this project are completed
+    const project = PROJECTS.find(p => p.id === projId);
+    if (project && nextProgressVal === project.tasks.length) {
+      // Auto-set project status to DONE
+      const updatedStatus = { ...projectStatus, [projId]: 'DONE' };
+      setProjectStatus(updatedStatus);
+      storage.setItem('projectStatus', JSON.stringify(updatedStatus));
+      
+      // Show accomplishments modal
+      setCompletedProjectModal({
+        show: true,
+        projectName: project.name,
+        totalXp: project.tasks.reduce((sum, t) => sum + t.xp, 0)
+      });
+      
+      // Sync to server with new DONE status
+      const activePasscode = passcode || storage.getItem('operator_passcode');
+      if (activePasscode) {
+        setTimeout(() => {
+          saveProgressToServer(activePasscode, dailyState, profile, chainProgress, storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`)) : {});
+        }, 100);
       }
     }
   };
@@ -846,74 +1676,7 @@ export default function App() {
     }
   }, [justUnlockedStepId]);
 
-  // Compute RPG stats dynamically based on daily completedTaskIds
-  const computedStats = useMemo(() => {
-    let sigintBonus = 0;
-    let opsBonus = 0;
-    let arsenalBonus = 0;
-    let commsBonus = 0;
-    let disciplineBonus = 0;
-    let enduranceBonus = 0;
 
-    const completedIds = dailyState.completedTaskIds || [];
-
-    completedIds.forEach(id => {
-      if (id.startsWith('chain:')) {
-        const parts = id.split(':');
-        if (parts.length === 3) {
-          const chainName = parts[1];
-          const stepIdx = parseInt(parts[2], 10);
-          const chain = CHAINS[chainName];
-          if (chain && chain[stepIdx]) {
-            const m = chain[stepIdx];
-            if (m.stat === 'SIGINT') sigintBonus += m.bonus || 0;
-            if (m.stat === 'OPS') opsBonus += m.bonus || 0;
-            if (m.stat === 'ARSENAL') arsenalBonus += m.bonus || 0;
-            if (m.stat === 'COMMS') commsBonus += m.bonus || 0;
-            if (m.stat === 'DISCIPLINE') disciplineBonus += m.bonus || 0;
-            if (m.stat === 'ENDURANCE') enduranceBonus += m.bonus || 0;
-          }
-        }
-      } else {
-        const task = FIXED_TASKS.find(t => t.id === id);
-        if (task) {
-          if (task.stat === 'SIGINT') sigintBonus += task.bonus || 0;
-          if (task.stat === 'OPS') opsBonus += task.bonus || 0;
-          if (task.stat === 'ARSENAL') arsenalBonus += task.bonus || 0;
-          if (task.stat === 'COMMS') commsBonus += task.bonus || 0;
-          if (task.stat === 'DISCIPLINE') disciplineBonus += task.bonus || 0;
-          if (task.stat === 'ENDURANCE') enduranceBonus += task.bonus || 0;
-        }
-      }
-    });
-
-    return {
-      sigint: Math.min(100, 62 + sigintBonus),
-      ops: Math.min(100, 45 + opsBonus),
-      arsenal: Math.min(100, 70 + arsenalBonus),
-      comms: Math.min(100, 40 + commsBonus),
-      discipline: Math.min(100, 55 + disciplineBonus),
-      endurance: Math.min(100, 60 + enduranceBonus),
-      sigintBonus,
-      opsBonus,
-      arsenalBonus,
-      commsBonus,
-      disciplineBonus,
-      enduranceBonus
-    };
-  }, [dailyState.completedTaskIds]);
-
-  // Level computation from XP
-  const levelProgress = useMemo(() => {
-    const totalXp = profile.totalXp;
-    const currentLevel = Math.floor(totalXp / 200) + 1;
-    const currentLevelXp = totalXp % 200;
-    return {
-      level: currentLevel,
-      xpInLevel: currentLevelXp,
-      pct: (currentLevelXp / 200) * 100
-    };
-  }, [profile.totalXp]);
 
   // Toggle mission completion for both type A and type B tasks
   const handleToggleMission = (taskId, xpReward, isChainTask, chainName, stepIdx, e) => {
@@ -952,7 +1715,10 @@ export default function App() {
     const savedTimes = storage.getItem(timesKey);
     if (savedTimes) {
       try {
-        completionTimes = JSON.parse(savedTimes);
+        const parsed = JSON.parse(savedTimes);
+        if (parsed && typeof parsed === 'object') {
+          completionTimes = parsed;
+        }
       } catch (err) {
         console.error("Failed to parse completion times", err);
       }
@@ -1263,12 +2029,14 @@ export default function App() {
         if (yesterdayLogsRaw) {
           try {
             const logs = JSON.parse(yesterdayLogsRaw);
-            logs.forEach(log => {
-              if (log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0) {
-                missedPenalizedCount++;
-                totalPenalty += Math.abs(log.xpPenalty);
-              }
-            });
+            if (Array.isArray(logs)) {
+              logs.forEach(log => {
+                if (log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0) {
+                  missedPenalizedCount++;
+                  totalPenalty += Math.abs(log.xpPenalty);
+                }
+              });
+            }
           } catch {}
         }
 
@@ -1315,6 +2083,74 @@ export default function App() {
         );
       })()}
 
+      {/* Weekly AI Performance Review Banner */}
+      {weeklyReview && !isWeeklyReviewDismissed && (() => {
+        const isoWeek = getISOWeekString();
+        
+        let borderLeftColor = 'var(--accent-green)';
+        let badgeColor = 'var(--accent-green)';
+        if (weeklyReview.threatLevel === 'AMBER') {
+          borderLeftColor = 'var(--accent-amber)';
+          badgeColor = 'var(--accent-amber)';
+        } else if (weeklyReview.threatLevel === 'RED') {
+          borderLeftColor = 'var(--accent-coral)';
+          badgeColor = 'var(--accent-coral)';
+        }
+
+        return (
+          <div style={{
+            background: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderLeft: `5px solid ${borderLeftColor}`,
+            padding: '16px',
+            marginBottom: '20px',
+            fontFamily: 'var(--font-mono)',
+            position: 'relative',
+            boxShadow: '0 0 10px rgba(0, 0, 0, 0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: `1px solid ${badgeColor}`,
+                  color: badgeColor,
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  padding: '2px 8px',
+                  textTransform: 'uppercase'
+                }}>
+                  THREAT LEVEL: {weeklyReview.threatLevel}
+                </span>
+                <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-main)', letterSpacing: '0.05em' }}>
+                  {weeklyReview.headline}
+                </span>
+              </div>
+              <button
+                onClick={() => {
+                  storage.setItem(`dismissedReview:${isoWeek}`, 'true');
+                  setIsWeeklyReviewDismissed(true);
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 'bold'
+                }}
+              >
+                [X]
+              </button>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+              <span>&gt; INSIGHT: {weeklyReview.insight}</span>
+              <span>&gt; FOCUS: {weeklyReview.nextWeekFocus}</span>
+              <span>&gt; STRONGEST STAT: <span style={{ color: 'var(--accent-green)' }}>{weeklyReview.strongestStat}</span> | WEAKEST STAT: <span style={{ color: 'var(--accent-coral)' }}>{weeklyReview.weakestStat}</span></span>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* NAVIGATION TABS */}
       <nav className="nav-tabs">
         <button 
@@ -1356,11 +2192,11 @@ export default function App() {
 
                 <div className="obj-progress-group">
                   <div className="obj-progress-header">
-                    <span>STAGE PROGRESS</span>
-                    <span>35%</span>
+                    <span>STAGE: {getStageLabel(mainObjectiveProgress)}</span>
+                    <span>{mainObjectiveProgress}%</span>
                   </div>
                   <div className="obj-progress-bar-outer">
-                    <div className="obj-progress-bar-inner" style={{ width: '35%' }}></div>
+                    <div className="obj-progress-bar-inner" style={{ width: `${mainObjectiveProgress}%`, transition: 'width 0.6s ease' }}></div>
                   </div>
                 </div>
 
@@ -1390,23 +2226,344 @@ export default function App() {
               <h2 className="panel-title">Project Board</h2>
               <hr className="section-divider" />
               <div className="projects-grid">
-                {PROJECTS.map((proj, idx) => (
-                  <div 
-                    key={idx} 
-                    className={`project-card ${proj.active ? 'active-project' : 'queued'}`}
-                  >
-                    <div className="project-status-row">
-                      <span className="project-name">{proj.name}</span>
-                      <span className={proj.active ? 'project-badge-active' : 'project-badge-queued'}>
-                        {proj.status}
+                {activeOrQueuedProjects.map((proj) => {
+                  const status = projectStatus[proj.id] || 'QUEUED';
+                  const progressIdx = projectProgress[proj.id] || 0;
+                  const totalTasks = proj.tasks.length;
+                  const pct = Math.round((progressIdx / totalTasks) * 100);
+                  const currentTask = progressIdx < totalTasks ? proj.tasks[progressIdx] : null;
+                  
+                  // Dynamic styles for status badge
+                  let badgeStyle = {
+                    background: 'rgba(255, 255, 255, 0.03)',
+                    border: '1px solid rgba(255, 255, 255, 0.15)',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: '1px 6px'
+                  };
+                  if (status === 'ACTIVE') {
+                    badgeStyle = {
+                      background: 'var(--accent-amber-dim)',
+                      border: '1px solid var(--accent-amber)',
+                      color: 'var(--accent-amber)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      padding: '1px 6px'
+                    };
+                  } else if (status === 'DONE') {
+                    badgeStyle = {
+                      background: 'var(--accent-green-dim)',
+                      border: '1px solid var(--accent-green)',
+                      color: 'var(--accent-green)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      padding: '1px 6px'
+                    };
+                  } else if (status === 'ON HOLD') {
+                    badgeStyle = {
+                      background: 'rgba(255, 255, 255, 0.03)',
+                      border: '1px solid rgba(255, 255, 255, 0.3)',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '10px',
+                      fontWeight: 'bold',
+                      padding: '1px 6px'
+                    };
+                  }
+
+                  return (
+                    <div 
+                      key={proj.id} 
+                      className={`project-card ${status === 'ACTIVE' ? 'active-project' : 'queued'}`}
+                    >
+                      <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: status === 'ACTIVE' ? 'var(--accent-amber)' : 'var(--text-main)', textTransform: 'uppercase' }}>{proj.name}</span>
+                        <span style={badgeStyle}>
+                          {status}
+                        </span>
+                      </div>
+
+                      <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                        Focus: {proj.focus}
                       </span>
+
+                      {/* Progress Bar */}
+                      <div className="project-progress-group" style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                          <span>PROGRESS</span>
+                          <span>{pct}% ({progressIdx}/{totalTasks})</span>
+                        </div>
+                        <div className="xp-bar-outer" style={{ height: '6px' }}>
+                          <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
+                        </div>
+                      </div>
+
+                      {/* Current Phase / Task */}
+                      <div className="project-current-task-group" style={{ marginBottom: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                        {currentTask ? (
+                          <>
+                            <span style={{ color: 'var(--accent-amber)', display: 'block', fontWeight: 'bold' }}>PHASE: {currentTask.phase}</span>
+                            <span style={{ color: 'var(--text-muted)', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentTask.name}</span>
+                          </>
+                        ) : (
+                          <span style={{ color: 'var(--accent-green)', display: 'block', fontWeight: 'bold' }}>PHASE: COMPLETE</span>
+                        )}
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
+                        <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)' }}>
+                          Daily Session XP: +{proj.dailyXP}
+                        </span>
+
+                        {/* Status Control Select */}
+                        <select 
+                          value={status} 
+                          onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
+                          className="dark-date-picker"
+                          style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid var(--border-color)', color: 'var(--accent-amber)' }}
+                        >
+                          <option value="QUEUED">QUEUED</option>
+                          <option value="ACTIVE">ACTIVE</option>
+                          <option value="ON HOLD">ON HOLD</option>
+                          <option value="DONE">DONE</option>
+                        </select>
+                      </div>
                     </div>
-                    <span className="project-focus">Focus: {proj.focus}</span>
-                    <span className="project-xp-reward">Daily session XP: +{proj.xp}</span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
+
+              {/* Collapsed COMPLETED PROJECTS row below */}
+              {doneProjects.length > 0 && (
+                <div className="completed-projects-section" style={{ marginTop: '20px' }}>
+                  <div 
+                    className="panel-title-clickable" 
+                    onClick={() => setIsCompletedProjectsExpanded(!isCompletedProjectsExpanded)} 
+                    style={{ 
+                      cursor: 'pointer', 
+                      display: 'flex', 
+                      justifyContent: 'space-between', 
+                      alignItems: 'center',
+                      userSelect: 'none'
+                    }}
+                  >
+                    <h3 className="panel-title" style={{ margin: 0, fontSize: '15px', color: 'var(--accent-green)' }}>🏆 COMPLETED PROJECTS ({doneProjects.length})</h3>
+                    <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                      {isCompletedProjectsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+                    </span>
+                  </div>
+                  <hr className="section-divider" style={{ borderColor: 'rgba(34, 197, 94, 0.3)', margin: '8px 0' }} />
+                  {isCompletedProjectsExpanded && (
+                    <div className="projects-grid">
+                      {doneProjects.map((proj) => {
+                        const totalTasks = proj.tasks.length;
+                        return (
+                          <div 
+                            key={proj.id} 
+                            className="project-card done"
+                            style={{ border: '1px solid var(--accent-green)', boxShadow: '0 0 10px rgba(34, 197, 94, 0.05)' }}
+                          >
+                            <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                              <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-green)', textTransform: 'uppercase' }}>{proj.name}</span>
+                              <span style={{
+                                background: 'var(--accent-green-dim)',
+                                border: '1px solid var(--accent-green)',
+                                color: 'var(--accent-green)',
+                                fontFamily: 'var(--font-mono)',
+                                fontSize: '10px',
+                                fontWeight: 'bold',
+                                padding: '1px 6px'
+                              }}>
+                                DONE
+                              </span>
+                            </div>
+
+                            <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                              Focus: {proj.focus}
+                            </span>
+
+                            <div className="project-progress-group" style={{ marginBottom: '12px' }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)', marginBottom: '4px' }}>
+                                <span>COMPLETED</span>
+                                <span>100% ({totalTasks}/{totalTasks})</span>
+                              </div>
+                              <div className="xp-bar-outer" style={{ height: '6px', borderColor: 'rgba(34, 197, 94, 0.2)' }}>
+                                <div className="xp-bar-inner" style={{ width: '100%', background: 'var(--accent-green)', boxShadow: '0 0 6px rgba(34, 197, 94, 0.3)' }}></div>
+                              </div>
+                            </div>
+
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed rgba(34, 197, 94, 0.2)' }}>
+                              <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>
+                                Project Complete
+                              </span>
+
+                              {/* Status Control Select to allow moving back */}
+                              <select 
+                                value="DONE" 
+                                onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
+                                className="dark-date-picker"
+                                style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid rgba(34, 197, 94, 0.3)', color: 'var(--accent-green)' }}
+                              >
+                                <option value="DONE">DONE</option>
+                                <option value="QUEUED">QUEUED</option>
+                                <option value="ACTIVE">ACTIVE</option>
+                                <option value="ON HOLD">ON HOLD</option>
+                              </select>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
             </section>
+
+            {/* SKILL MAP SECTION */}
+            <section className="skill-map-section">
+              <div 
+                className="panel-title-clickable" 
+                onClick={() => setIsSkillMapExpanded(!isSkillMapExpanded)} 
+                style={{ 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  userSelect: 'none'
+                }}
+              >
+                <h2 className="panel-title" style={{ margin: 0 }}>🗺️ SKILL MAP</h2>
+                <span 
+                  className="collapse-arrow" 
+                  style={{ 
+                    color: 'var(--accent-amber)', 
+                    fontFamily: 'var(--font-mono)', 
+                    fontSize: '13px',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  {isSkillMapExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+                </span>
+              </div>
+              <hr className="section-divider" />
+
+              {isSkillMapExpanded && (
+                <div className="skill-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
+                  {['NETWORKING', 'LINUX', 'SOC OPERATIONS', 'WEB SECURITY', 'TOOLS MASTERY', 'ACTIVE DIRECTORY', 'INTERVIEW PREP'].map(domain => {
+                    const chain = CHAINS[domain];
+                    const completedCount = chainProgress[domain] || 0;
+                    const totalSteps = chain.length;
+                    const pct = Math.round((completedCount / totalSteps) * 100);
+                    
+                    return (
+                      <div 
+                        key={domain} 
+                        className="skill-card" 
+                        style={{ 
+                          background: 'var(--bg-card)', 
+                          border: '1px solid var(--border-color)', 
+                          padding: '16px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '15px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
+                            {domain}
+                          </span>
+                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-amber)' }}>
+                            {pct}%
+                          </span>
+                        </div>
+                        
+                        <div className="xp-bar-outer" style={{ height: '6px' }}>
+                          <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
+                        </div>
+
+                        <div className="skill-steps-list" style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                          {chain.map((step, idx) => {
+                            const isCleared = idx < completedCount;
+                            return (
+                              <div 
+                                key={idx} 
+                                style={{ 
+                                  fontSize: '11px', 
+                                  fontFamily: 'var(--font-mono)', 
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                  color: isCleared ? 'var(--accent-green)' : 'var(--text-muted)',
+                                  textDecoration: isCleared ? 'line-through' : 'none'
+                                }}
+                              >
+                                <span>{isCleared ? '✓' : '○'}</span>
+                                <span style={{ opacity: isCleared ? 0.6 : 1 }}>
+                                  {step.title}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+
+            {/* PROJECT OPS section */}
+            {activeProject && renderedOpsTasks.length > 0 && (
+              <section className="project-ops-section">
+                <h2 className="panel-title">Project Ops // {activeProject.name}</h2>
+                <hr className="section-divider" />
+                <div className="missions-grid" style={{ marginBottom: '24px' }}>
+                  {renderedOpsTasks.map(({ task, completed }) => {
+                    const isJustUnlocked = justUnlockedStepId === task.id;
+                    return (
+                      <div 
+                        key={task.id} 
+                        className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                        onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
+                      >
+                        <div className="checkbox-container">
+                          <span className="checkmark-icon"></span>
+                        </div>
+                        <div className="mission-details">
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                            <span className="mission-title">{task.name}</span>
+                            {isJustUnlocked && (
+                              <span style={{ 
+                                fontSize: '10px', 
+                                fontFamily: 'var(--font-mono)', 
+                                color: 'var(--accent-green)', 
+                                border: '1px solid var(--accent-green)', 
+                                padding: '0 4px', 
+                                marginLeft: '8px',
+                                textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                UNLOCKED
+                              </span>
+                            )}
+                          </div>
+                          <div className="mission-meta">
+                            <span className="badge badge-ops" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
+                              {task.phase}
+                            </span>
+                            <span className="xp-reward">+{task.xp} XP</span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+            )}
 
             {/* DAILY OPS Grid */}
             <section className="daily-ops-section">
@@ -1550,6 +2707,97 @@ export default function App() {
               </div>
             </section>
 
+            {/* LIFE METRICS SECTION */}
+            <section className="life-metrics-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
+              <div 
+                className="panel-title-clickable" 
+                onClick={() => setIsLifeMetricsExpanded(!isLifeMetricsExpanded)} 
+                style={{ 
+                  cursor: 'pointer', 
+                  display: 'flex', 
+                  justifyContent: 'space-between', 
+                  alignItems: 'center',
+                  userSelect: 'none'
+                }}
+              >
+                <h2 className="panel-title" style={{ margin: 0 }}>📊 LIFE METRICS</h2>
+                <span 
+                  className="collapse-arrow" 
+                  style={{ 
+                    color: 'var(--accent-amber)', 
+                    fontFamily: 'var(--font-mono)', 
+                    fontSize: '13px',
+                    letterSpacing: '0.05em'
+                  }}
+                >
+                  {isLifeMetricsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+                </span>
+              </div>
+              <hr className="section-divider" />
+
+              {isLifeMetricsExpanded && (() => {
+                const c30 = getCompletedCountsForLast30Days();
+                const careerNum = (c30['fixed:apply_roles'] || 0) + (c30['fixed:cold_email'] || 0) + (c30['fixed:update_linkedin'] || 0);
+                const physicalNum = (c30['fixed:post_nap_exercise'] || 0) + (c30['fixed:drink_water'] || 0) + (c30['fixed:sleep_early'] || 0);
+                const mentalNum = (c30['fixed:morning_ritual'] || 0) + (c30['fixed:after_action_report'] || 0);
+                const socialNum = c30['fixed:evening_patrol'] || 0;
+
+                const careerPct = Math.min(100, Math.round((careerNum / 90) * 100));
+                const physicalPct = Math.min(100, Math.round((physicalNum / 90) * 100));
+                const mentalPct = Math.min(100, Math.round((mentalNum / 60) * 100));
+                const socialPct = Math.min(100, Math.round((socialNum / 30) * 100));
+
+                const metrics = [
+                  { name: 'CAREER MOMENTUM', pct: careerPct, label: 'Job hunt execution' },
+                  { name: 'PHYSICAL CONDITION', pct: physicalPct, label: 'Health consistency' },
+                  { name: 'MENTAL DISCIPLINE', pct: mentalPct, label: 'Routine adherence' },
+                  { name: 'SOCIAL BATTERY', pct: socialPct, label: 'Real world presence' }
+                ];
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+                    <div className="metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+                      {metrics.map(metric => (
+                        <div 
+                          key={metric.name} 
+                          className="metric-card" 
+                          style={{ 
+                            background: 'var(--bg-card)', 
+                            border: '1px solid var(--border-color)', 
+                            padding: '16px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px'
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
+                              {metric.name}
+                            </span>
+                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--accent-amber)' }}>
+                              {metric.pct}%
+                            </span>
+                          </div>
+                          
+                          <div className="xp-bar-outer" style={{ height: '8px' }}>
+                            <div className="xp-bar-inner" style={{ width: `${metric.pct}%`, transition: 'width 0.6s ease' }}></div>
+                          </div>
+                          
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                            {metric.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
+                      30-DAY SNAPSHOT: {get30DayRangeString()}
+                    </div>
+                  </div>
+                );
+              })()}
+            </section>
+
+
             {/* COLLAPSIBLE MISSION LOGS */}
             <section className="mission-logs-section">
               <div 
@@ -1636,8 +2884,27 @@ export default function App() {
                         );
                       }
 
-                      const completedLogs = dayLogs.filter(l => l.type === 'completed');
-                      const missedLogs = dayLogs.filter(l => l.type === 'missed');
+                      if (!Array.isArray(dayLogs)) {
+                        return (
+                          <div 
+                            className="empty-logs-msg" 
+                            style={{ 
+                              padding: '24px', 
+                              border: '1px dashed var(--border-color)', 
+                              color: 'var(--text-muted)', 
+                              fontFamily: 'var(--font-mono)', 
+                              fontSize: '13px', 
+                              textAlign: 'center',
+                              background: 'rgba(0, 0, 0, 0.2)'
+                            }}
+                          >
+                            NO DATA FOR THIS DATE
+                          </div>
+                        );
+                      }
+
+                      const completedLogs = dayLogs.filter(l => l && l.type === 'completed');
+                      const missedLogs = dayLogs.filter(l => l && l.type === 'missed');
                       const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
                                       missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
 
@@ -1953,7 +3220,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.sigint}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.sigint}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.sigint}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -1968,7 +3235,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.ops}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.ops}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.ops}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -1983,7 +3250,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.arsenal}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.arsenal}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.arsenal}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -1998,7 +3265,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.comms}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.comms}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.comms}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -2013,7 +3280,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.discipline}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.discipline}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.discipline}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -2028,7 +3295,7 @@ export default function App() {
                       <span className="stat-value">{computedStats.endurance}%</span>
                     </div>
                     <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.endurance}%` }}></div>
+                      <div className="stat-bar-inner" style={{ width: `${computedStats.endurance}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
                   </div>
 
@@ -2141,6 +3408,74 @@ export default function App() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Project Accomplished Modal Overlay */}
+      {completedProjectModal.show && (
+        <div className="debrief-modal-overlay" style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(7, 8, 10, 0.95)',
+          zIndex: 200000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px'
+        }}>
+          <div className="debrief-modal-box" style={{
+            width: '100%',
+            maxWidth: '500px',
+            background: 'var(--bg-card)',
+            border: '2px solid var(--accent-green)',
+            padding: '24px',
+            boxShadow: '0 0 20px rgba(34, 197, 94, 0.25)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--accent-green)',
+            position: 'relative',
+            textAlign: 'center'
+          }}>
+            <div style={{
+              borderBottom: '1px dashed var(--accent-green)',
+              paddingBottom: '12px',
+              marginBottom: '16px',
+              fontSize: '18px',
+              fontWeight: 'bold',
+              letterSpacing: '0.05em'
+            }}>
+              🏆 PROJECT COMPLETE — MISSION ACCOMPLISHED
+            </div>
+            <p style={{ color: 'var(--text-main)', fontSize: '14px', marginBottom: '16px', lineHeight: '1.6' }}>
+              All operational phases of <strong style={{ color: 'var(--accent-green)' }}>{completedProjectModal.projectName}</strong> have been successfully concluded.
+            </p>
+            <div style={{ fontSize: '20px', fontWeight: 'bold', margin: '20px 0', color: 'var(--accent-green)' }}>
+              TOTAL PROJECT REWARD: +{completedProjectModal.totalXp} XP
+            </div>
+            <button 
+              onClick={() => setCompletedProjectModal({ show: false, projectName: '', totalXp: 0 })}
+              style={{
+                background: 'var(--bg-terminal)',
+                border: '1px solid var(--accent-green)',
+                color: 'var(--accent-green)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '13px',
+                padding: '8px 20px',
+                cursor: 'pointer',
+                textTransform: 'uppercase',
+                marginTop: '12px'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.background = 'var(--accent-green)';
+                e.currentTarget.style.color = 'var(--bg-terminal)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.background = 'var(--bg-terminal)';
+                e.currentTarget.style.color = 'var(--accent-green)';
+              }}
+            >
+              [ DISMISS COMMS ]
+            </button>
           </div>
         </div>
       )}

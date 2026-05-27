@@ -47,3 +47,40 @@ export async function fetchDailyDebrief(payload) {
     return 'COMMS ERROR: Commander unavailable. File your own report.';
   }
 }
+
+export async function fetchWeeklyReview(payload) {
+  try {
+    const systemPrompt = `You are an AI mission controller tracking a cybersecurity operative's weekly performance.
+Analyse the data provided and return ONLY valid JSON, no markdown, no backticks.
+Format exactly:
+{
+  "headline": "one punchy sentence summarising the week (max 12 words)",
+  "strongestStat": "stat name that improved most",
+  "weakestStat": "stat name that needs most work",
+  "insight": "one specific observation about their pattern (max 20 words)",
+  "nextWeekFocus": "one specific recommendation (max 15 words)",
+  "threatLevel": "GREEN | AMBER | RED based on overall discipline"
+}`;
+
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'weeklyReview',
+        payload: {
+          ...payload,
+          systemPrompt,
+          system_prompt: systemPrompt,
+          system: systemPrompt
+        }
+      })
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    const clean = data.result.replace(/```json|```/g, '').trim();
+    return JSON.parse(clean);
+  } catch (err) {
+    console.warn('Weekly review failed:', err.message);
+    return null;
+  }
+}
