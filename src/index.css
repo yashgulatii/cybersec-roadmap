@@ -1120,3 +1120,200 @@ body::after {
   filter: invert(72%) sepia(85%) saturate(834%) hue-rotate(346deg) brightness(101%) contrast(93%);
   cursor: pointer;
 }
+
+/* SIDEBAR LAYOUT CLASS OVERRIDES */
+.layout-wrapper {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  background-color: var(--bg-terminal);
+}
+
+.sidebar {
+  width: 220px;
+  background: #090c0f;
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 100;
+  padding: 20px 0;
+}
+
+.sidebar-title {
+  font-family: var(--font-header);
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--accent-amber);
+  padding: 0 20px;
+  margin-bottom: 30px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.sidebar-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sidebar-link {
+  font-family: var(--font-header);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-muted);
+  padding: 12px 20px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-left: 3px solid transparent;
+  transition: all 0.2s ease-in-out;
+  text-transform: uppercase;
+  user-select: none;
+}
+
+.sidebar-link:hover {
+  background: rgba(245, 166, 35, 0.03);
+  color: var(--text-main);
+}
+
+.sidebar-link.active {
+  background: var(--accent-amber-dim);
+  border-left-color: var(--accent-amber);
+  color: var(--accent-amber);
+  text-shadow: 0 0 4px var(--accent-amber-glow);
+}
+
+.main-content {
+  flex: 1;
+  margin-left: 220px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* MOBILE RESPONSIVE SIDEBAR */
+@media (max-width: 768px) {
+  .layout-wrapper {
+    flex-direction: column;
+  }
+  .sidebar {
+    width: 100%;
+    height: auto;
+    position: static;
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 15px;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+  }
+  .sidebar-title {
+    margin-bottom: 0;
+    padding: 0;
+    font-size: 18px;
+  }
+  .sidebar-menu {
+    flex-direction: row;
+    gap: 8px;
+  }
+  .sidebar-link {
+    padding: 8px 10px;
+    font-size: 12px;
+    border-left: none;
+    border-bottom: 3px solid transparent;
+  }
+  .sidebar-link.active {
+    border-left-color: transparent;
+    border-bottom-color: var(--accent-amber);
+  }
+  .main-content {
+    margin-left: 0;
+    padding: 15px;
+  }
+}
+
+/* SCHEDULE CARD */
+.schedule-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  padding: 20px;
+  margin-bottom: 20px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.schedule-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.schedule-badge {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: bold;
+  padding: 2px 8px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.schedule-badge.now {
+  background: var(--accent-green-dim);
+  border: 1px solid var(--accent-green);
+  color: var(--accent-green);
+  box-shadow: 0 0 6px rgba(34, 197, 94, 0.2);
+  animation: pulse-glow 1.5s infinite alternate;
+}
+
+.schedule-badge.next {
+  background: var(--accent-amber-dim);
+  border: 1px solid var(--accent-amber);
+  color: var(--accent-amber);
+}
+
+.schedule-progress-outer {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative;
+  margin: 4px 0;
+}
+
+.schedule-progress-inner {
+  height: 100%;
+  background: var(--accent-amber);
+  box-shadow: 0 0 4px var(--accent-amber-glow);
+  transition: width 1s linear;
+}
+
+.schedule-next-label {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* BRIEFING CARD STATS */
+.briefing-stats-row {
+  display: flex;
+  justify-content: space-between;
+  background: var(--bg-terminal);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 10px 16px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--accent-amber);
+  margin-top: 8px;
+}
+
+.briefing-stat-item {
+  display: flex;
+  gap: 6px;
+}

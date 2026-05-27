@@ -358,7 +358,16 @@ const initializeTelemetry = () => {
 };
 
 export default function App() {
-  const [activeTab, setActiveTab] = useState('missions');
+  const [activePage, setActivePage] = useState('home');
+  const [tick, setTick] = useState(0);
+
+  // Dynamic schedule updater: tick every 60 seconds
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTick(prev => prev + 1);
+    }, 60000);
+    return () => clearInterval(timer);
+  }, []);
   
   // Auth states
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -1960,12 +1969,7 @@ export default function App() {
         completionTimes[taskId] = new Date().toISOString();
         netXpChange = xpReward;
 
-        updatedProgress = { ...chainProgress, [chainName]: Math.max(chainProgress[chainName] || 0, stepIdx + 1) };
-        setChainProgress(updatedProgress);
-        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set('chainProgress', JSON.stringify(updatedProgress));
-        }
-        storage.setItem('chainProgress', JSON.stringify(updatedProgress));
+        // chainProgress is not updated during the day to ensure it never decrements/resets
       } else {
         // UNMARK PROGRESSIVE CHAIN TASK
         // Unmarking removes this step and any higher chain steps that have been checked
@@ -2004,12 +2008,7 @@ export default function App() {
           return true;
         }));
 
-        updatedProgress = { ...chainProgress, [chainName]: Math.min(chainProgress[chainName] || 0, stepIdx) };
-        setChainProgress(updatedProgress);
-        if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set('chainProgress', JSON.stringify(updatedProgress));
-        }
-        storage.setItem('chainProgress', JSON.stringify(updatedProgress));
+        // chainProgress is not updated during the day to ensure it never decrements/resets
       }
     } else {
       // FIXED TASK TOGGLING
@@ -2079,52 +2078,26 @@ export default function App() {
   const getVisibleChainSteps = (chainName) => {
     const chain = CHAINS[chainName];
     if (!chain) return [];
+    const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
     const currentIdx = chainProgress[chainName] !== undefined ? chainProgress[chainName] : 0;
     
-    // Find how many steps of this chain were completed today
-    const completedTodayCount = dailyState.completedTaskIds.filter(id => 
-      id.startsWith(`chain:${chainName}:`)
-    ).length;
-    
-    const startOfDayIdx = Math.max(0, currentIdx - completedTodayCount);
+    if (currentIdx >= tasksArray.length) {
+      return [];
+    }
+
     const visible = [];
-    
-    // Push all completed steps today
-    for (let i = startOfDayIdx; i < currentIdx; i++) {
-      if (chain[i]) {
-        visible.push({
-          id: `chain:${chainName}:${i}`,
-          stepIdx: i,
-          task: chain[i]
-        });
-      }
-    }
-    
-    // Push the next active step if either:
-    // 1. No steps have been completed today (show the active step for today)
-    // 2. Or, the next step is explicitly unlocked in session-only unlockedTasks
-    if (currentIdx < chain.length) {
-      const nextStepId = `chain:${chainName}:${currentIdx}`;
-      if (completedTodayCount === 0 || unlockedTasks.includes(nextStepId)) {
-        visible.push({
-          id: nextStepId,
-          stepIdx: currentIdx,
-          task: chain[currentIdx]
-        });
-      }
-    }
-    
-    // Push any subsequent steps in unlockedTasks
-    let nextIdx = currentIdx + 1;
-    while (nextIdx < chain.length) {
-      const subStepId = `chain:${chainName}:${nextIdx}`;
-      if (unlockedTasks.includes(subStepId)) {
-        visible.push({
-          id: subStepId,
-          stepIdx: nextIdx,
-          task: chain[nextIdx]
-        });
-        nextIdx++;
+    let idx = currentIdx;
+    while (idx < tasksArray.length) {
+      const taskId = `chain:${chainName}:${idx}`;
+      const isCompleted = dailyState.completedTaskIds.includes(taskId);
+      visible.push({
+        id: taskId,
+        stepIdx: idx,
+        task: tasksArray[idx]
+      });
+      
+      if (isCompleted) {
+        idx++;
       } else {
         break;
       }
@@ -2204,594 +2177,652 @@ export default function App() {
     );
   }
 
-  return (
-    <div className="app-container">
-      {/* XP Floating Particle Container */}
-      <div className="xp-particle-layer">
-        {particles.map(p => (
-          <div key={p.id} className="xp-particle" style={{ left: p.x, top: p.y }}>
-            +{p.xp} XP
-          </div>
-        ))}
-      </div>
+  // ==========================================
+  // RENDER HELPERS FOR MULTI-PAGE SIDEBAR LAYOUT
+  // ==========================================
 
-      {/* GLOBAL HEADER */}
-      <header className="global-header">
-        <div className="header-top-row">
-          <div className="operator-tag">
-            <span className="pulse-dot"></span>
-            OPERATOR: YASH
-            <span style={{ fontSize: '11px', color: syncLoading ? '#f5a623' : '#22c55e', marginLeft: '10px', fontWeight: 'normal', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
-              {syncLoading ? '[SYNCING...]' : '[ONLINE]'}
-            </span>
-            {isFlavorLoading && (
-              <span style={{ fontSize: '11px', color: 'var(--accent-amber)', marginLeft: '15px', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>
-                [ LOADING MISSION BRIEFING... ]
-              </span>
-            )}
-          </div>
-          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-            <button 
-              onClick={handleEndShift}
-              className="end-shift-btn"
-              style={{
-                background: 'var(--bg-terminal)',
-                border: '1px solid var(--accent-amber)',
-                color: 'var(--accent-amber)',
-                fontFamily: 'var(--font-mono)',
-                fontSize: '12px',
-                fontWeight: 'bold',
-                padding: '4px 12px',
-                cursor: 'pointer',
-                boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
-                transition: 'all 0.2s',
-                textTransform: 'uppercase'
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = 'var(--accent-amber)';
-                e.currentTarget.style.color = 'var(--bg-terminal)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = 'var(--bg-terminal)';
-                e.currentTarget.style.color = 'var(--accent-amber)';
-              }}
-            >
-              {isDayClosed ? '[ VIEW DEBRIEF ]' : '[ END SHIFT ]'}
-            </button>
-            <span className="streak-counter">
-              🔥 STREAK: {profile.streak} {profile.streak === 1 ? 'DAY' : 'DAYS'}
-            </span>
-            <span className="level-badge">
-              LVL {levelProgress.level}
+  const renderScheduleBlock = () => {
+    const parseTimeToMinutes = (timeStr) => {
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      return hours * 60 + minutes;
+    };
+
+    const SCHEDULE = [
+      { id: 's1', label: 'MORNING RITUAL', start: '06:00', end: '07:00', type: 'DISCIPLINE', description: 'No screen. Surya. Set intentions.' },
+      { id: 's2', label: 'SKILL BLOCK', start: '07:00', end: '09:00', type: 'ROADMAP', description: "Today's chain task. Deep focus only." },
+      { id: 's3', label: 'PROJECT SESSION', start: '09:00', end: '11:00', type: 'BUILD', description: 'Active project task. No distractions.' },
+      { id: 's4', label: 'JOB APPLICATIONS', start: '11:00', end: '12:30', type: 'OPS', description: 'Apply to 5 roles. Cold emails. LinkedIn.' },
+      { id: 's5', label: 'BREAK + FOOD', start: '12:30', end: '14:00', type: 'PHYSICAL', description: 'Eat. Rest. No guilt.' },
+      { id: 's6', label: 'NAP', start: '14:00', end: '15:00', type: 'PHYSICAL', description: 'Mandatory recovery.' },
+      { id: 's7', label: 'POST-NAP EXERCISE', start: '15:00', end: '15:45', type: 'PHYSICAL', description: 'Move. No excuses.' },
+      { id: 's8', label: 'LABS SESSION', start: '15:45', end: '18:00', type: 'LABS', description: 'THM room or PortSwigger lab.' },
+      { id: 's9', label: 'INTERVIEW PREP', start: '18:00', end: '19:30', type: 'COMMS', description: 'STAR answers. Record yourself. Review.' },
+      { id: 's10', label: 'INTEL READ', start: '19:30', end: '20:00', type: 'INTEL', description: 'One article. Threat intel or AppSec.' },
+      { id: 's11', label: 'EVENING PATROL', start: '20:00', end: '21:00', type: 'SOCIAL', description: 'Full hour walk. Real world. Phone away.' },
+      { id: 's12', label: 'AFTER ACTION REPORT', start: '21:00', end: '21:30', type: 'DISCIPLINE', description: 'Write what you did. Be honest.' },
+      { id: 's13', label: 'WIND DOWN', start: '21:30', end: '23:00', type: 'DISCIPLINE', description: 'No work. Read. Sleep before 1AM.' },
+    ];
+
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+    // If before 06:00 or after 23:00
+    if (currentMinutes < 360 || currentMinutes >= 1380) {
+      return (
+        <div className="schedule-card" style={{ border: '1px solid rgba(255, 255, 255, 0.1)', background: 'rgba(255, 255, 255, 0.02)' }}>
+          <div className="schedule-header" style={{ justifyContent: 'center' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)', fontWeight: 'bold', letterSpacing: '0.1em' }}>
+              [ OFF HOURS — REST AND RECOVER ]
             </span>
           </div>
         </div>
-        <div className="xp-progress-container">
-          <div className="xp-bar-outer">
-            <div className="xp-bar-inner" style={{ width: `${levelProgress.pct}%` }}></div>
-          </div>
-          <div className="xp-numbers">
-            {levelProgress.xpInLevel} / 200 XP
-          </div>
-        </div>
-      </header>
+      );
+    }
 
-      {/* Missed Task Penalty Warning Banner */}
-      {showPenaltyBanner && (() => {
-        const yesterday = getYesterdayString();
-        const yesterdayLogsRaw = storage.getItem(`log:${yesterday}`);
-        let missedPenalizedCount = 0;
-        let totalPenalty = 0;
-        if (yesterdayLogsRaw) {
-          try {
-            const logs = JSON.parse(yesterdayLogsRaw);
-            if (Array.isArray(logs)) {
-              logs.forEach(log => {
-                if (log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0) {
-                  missedPenalizedCount++;
-                  totalPenalty += Math.abs(log.xpPenalty);
-                }
-              });
+    let activeBlock = null;
+    let activeIndex = -1;
+    for (let i = 0; i < SCHEDULE.length; i++) {
+      const block = SCHEDULE[i];
+      const startMins = parseTimeToMinutes(block.start);
+      const endMins = parseTimeToMinutes(block.end);
+      if (currentMinutes >= startMins && currentMinutes < endMins) {
+        activeBlock = block;
+        activeIndex = i;
+        break;
+      }
+    }
+
+    if (activeBlock) {
+      const startMins = parseTimeToMinutes(activeBlock.start);
+      const endMins = parseTimeToMinutes(activeBlock.end);
+      const progressPct = ((currentMinutes - startMins) / (endMins - startMins)) * 100;
+      const nextBlock = activeIndex + 1 < SCHEDULE.length ? SCHEDULE[activeIndex + 1] : null;
+
+      return (
+        <div className="schedule-card">
+          <div className="schedule-header">
+            <span className="schedule-badge now" style={{ display: 'inline-block' }}>NOW</span>
+            <span className="timeline-type-tag" style={{ color: 'var(--accent-amber)', borderColor: 'var(--accent-amber)' }}>{activeBlock.type}</span>
+          </div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent-amber)', letterSpacing: '0.05em' }}>
+            {activeBlock.label}
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
+            TIME RANGE: {activeBlock.start} - {activeBlock.end}
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-main)', marginTop: '4px' }}>
+            {activeBlock.description}
+          </div>
+          <div className="schedule-progress-outer">
+            <div className="schedule-progress-inner" style={{ width: `${progressPct}%` }}></div>
+          </div>
+          {nextBlock && (
+            <div className="schedule-next-label">
+              NEXT: {nextBlock.label} AT {nextBlock.start}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    let nextBlock = null;
+    let nextIndex = -1;
+    for (let i = 0; i < SCHEDULE.length; i++) {
+      const block = SCHEDULE[i];
+      const startMins = parseTimeToMinutes(block.start);
+      if (currentMinutes < startMins) {
+        nextBlock = block;
+        nextIndex = i;
+        break;
+      }
+    }
+
+    if (nextBlock) {
+      return (
+        <div className="schedule-card">
+          <div className="schedule-header">
+            <span className="schedule-badge next">NEXT</span>
+            <span className="timeline-type-tag">{nextBlock.type}</span>
+          </div>
+          <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent-amber)', letterSpacing: '0.05em' }}>
+            {nextBlock.label}
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
+            STARTING AT: {nextBlock.start} - {nextBlock.end}
+          </div>
+          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-main)', marginTop: '4px' }}>
+            {nextBlock.description}
+          </div>
+          <div className="schedule-progress-outer">
+            <div className="schedule-progress-inner" style={{ width: '0%' }}></div>
+          </div>
+          {nextIndex + 1 < SCHEDULE.length && (
+            <div className="schedule-next-label">
+              FOLLOWED BY: {SCHEDULE[nextIndex + 1].label} AT {SCHEDULE[nextIndex + 1].start}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const renderTodaysBriefing = () => {
+    const xpToday = (() => {
+      let total = 0;
+      dailyState.completedTaskIds.forEach(id => {
+        if (id.startsWith('chain:')) {
+          const parts = id.split(':');
+          if (parts.length === 3) {
+            const chainName = parts[1];
+            const stepIdx = parseInt(parts[2], 10);
+            const chain = CHAINS[chainName];
+            if (chain && chain[stepIdx]) {
+              total += chain[stepIdx].xp;
             }
-          } catch {}
+          }
+        } else {
+          const task = FIXED_TASKS.find(t => t.id === id);
+          if (task) {
+            total += task.xp;
+          }
         }
+      });
+      Object.keys(projectCompletedTasks).forEach(projId => {
+        const project = PROJECTS.find(p => p.id === projId);
+        const completedToday = projectCompletedTasks[projId] || [];
+        completedToday.forEach(taskId => {
+          const task = project?.tasks.find(t => t.id === taskId);
+          if (task) {
+            total += task.xp;
+          }
+        });
+      });
+      return total;
+    })();
 
-        if (missedPenalizedCount === 0) return null;
+    const tasksLeft = (() => {
+      const fixedLeft = FIXED_TASKS.filter(t => !dailyState.completedTaskIds.includes(t.id)).length;
+      const mappedActive = mapDomainKey(todaysDomain);
+      const currentStep = chainProgress[mappedActive] || 0;
+      const chain = CHAINS[mappedActive];
+      const chainTaskId = `chain:${mappedActive}:${currentStep}`;
+      const chainLeft = (chain && currentStep < chain.length && !dailyState.completedTaskIds.includes(chainTaskId)) ? 1 : 0;
+      let projectLeft = 0;
+      if (activeProject) {
+        const prog = projectProgress[activeProject.id] || 0;
+        const completedToday = projectCompletedTasks[activeProject.id] || [];
+        if (prog < activeProject.tasks.length && completedToday.length === 0) {
+          projectLeft = 1;
+        }
+      }
+      return fixedLeft + chainLeft + projectLeft;
+    })();
 
-        return (
+    const chainId = mapDomainKey(todaysDomain);
+
+    return (
+      <section className="main-objective-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h2 className="panel-title">Today's Briefing</h2>
+        <hr className="section-divider" />
+        <div className="main-objective-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          
           <div style={{
-            background: 'rgba(255, 111, 97, 0.1)',
-            border: '1px solid var(--accent-coral)',
-            color: 'var(--accent-coral)',
-            padding: '12px 16px',
-            marginBottom: '20px',
             fontFamily: 'var(--font-mono)',
             fontSize: '14px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            boxShadow: '0 0 10px rgba(255, 111, 97, 0.15)',
-            textShadow: '0 0 4px rgba(255, 111, 97, 0.4)'
+            fontWeight: 'bold',
+            color: 'var(--accent-amber)',
+            borderBottom: '1px dashed var(--border-color)',
+            paddingBottom: '8px'
           }}>
-            <span>
-              ⚠ YESTERDAY YOU WENT DARK ON {missedPenalizedCount} MISSIONS — {totalPenalty} XP LOST
+            TODAY'S DOMAIN: {chainId.toUpperCase()}
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              &gt; ACTIVE SKILL PATH MISSION
             </span>
-            <button 
-              onClick={() => {
-                const today = getTodayString();
-                storage.setItem(`dismissed_banner:${today}`, 'true');
-                setShowPenaltyBanner(false);
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--accent-coral)',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-mono)',
-                fontWeight: 'bold',
-                fontSize: '16px',
-                marginLeft: '12px'
-              }}
-            >
-              [X]
-            </button>
-          </div>
-        );
-      })()}
-
-      {/* Weekly AI Performance Review Banner */}
-      {weeklyReview && !isWeeklyReviewDismissed && (() => {
-        const isoWeek = getISOWeekString();
-        
-        let borderLeftColor = 'var(--accent-green)';
-        let badgeColor = 'var(--accent-green)';
-        if (weeklyReview.threatLevel === 'AMBER') {
-          borderLeftColor = 'var(--accent-amber)';
-          badgeColor = 'var(--accent-amber)';
-        } else if (weeklyReview.threatLevel === 'RED') {
-          borderLeftColor = 'var(--accent-coral)';
-          badgeColor = 'var(--accent-coral)';
-        }
-
-        return (
-          <div style={{
-            background: 'var(--bg-card)',
-            border: '1px solid var(--border-color)',
-            borderLeft: `5px solid ${borderLeftColor}`,
-            padding: '16px',
-            marginBottom: '20px',
-            fontFamily: 'var(--font-mono)',
-            position: 'relative',
-            boxShadow: '0 0 10px rgba(0, 0, 0, 0.3)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{
-                  background: 'rgba(255, 255, 255, 0.05)',
-                  border: `1px solid ${badgeColor}`,
-                  color: badgeColor,
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  padding: '2px 8px',
-                  textTransform: 'uppercase'
-                }}>
-                  THREAT LEVEL: {weeklyReview.threatLevel}
-                </span>
-                <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-main)', letterSpacing: '0.05em' }}>
-                  {weeklyReview.headline}
-                </span>
-              </div>
-              <button
-                onClick={() => {
-                  storage.setItem(`dismissedReview:${isoWeek}`, 'true');
-                  setIsWeeklyReviewDismissed(true);
-                }}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: 'var(--text-muted)',
-                  cursor: 'pointer',
-                  fontSize: '14px',
-                  fontWeight: 'bold'
-                }}
-              >
-                [X]
-              </button>
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
-              <span>&gt; INSIGHT: {weeklyReview.insight}</span>
-              <span>&gt; FOCUS: {weeklyReview.nextWeekFocus}</span>
-              <span>&gt; STRONGEST STAT: <span style={{ color: 'var(--accent-green)' }}>{weeklyReview.strongestStat}</span> | WEAKEST STAT: <span style={{ color: 'var(--accent-coral)' }}>{weeklyReview.weakestStat}</span></span>
-            </div>
-          </div>
-        );
-      })()}
-
-      {/* NAVIGATION TABS */}
-      <nav className="nav-tabs">
-        <button 
-          className={`tab-btn ${activeTab === 'missions' ? 'active' : ''}`}
-          onClick={() => setActiveTab('missions')}
-        >
-          Missions
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'schedule' ? 'active' : ''}`}
-          onClick={() => setActiveTab('schedule')}
-        >
-          Schedule
-        </button>
-        <button 
-          className={`tab-btn ${activeTab === 'character' ? 'active' : ''}`}
-          onClick={() => setActiveTab('character')}
-        >
-          Character
-        </button>
-      </nav>
-
-      {/* TAB CONTENT PANEL */}
-      <main className="tab-content-panel">
-        {activeTab === 'missions' && (
-          <div className="missions-layout">
-            
-            {/* MAIN OBJECTIVE */}
-            <section className="main-objective-section">
-              <h2 className="panel-title">Main Objective</h2>
-              <hr className="section-divider" />
-              <div className="main-objective-card">
-                <div className="obj-header">
-                  <div className="obj-title-group">
-                    <h3>Land First Cybersecurity Role</h3>
-                  </div>
-                  <span className="status-badge">ACTIVE</span>
-                </div>
-
-                <div className="obj-progress-group">
-                  <div className="obj-progress-header">
-                    <span>STAGE: {getStageLabel(mainObjectiveProgress)}</span>
-                    <span>{mainObjectiveProgress}%</span>
-                  </div>
-                  <div className="obj-progress-bar-outer">
-                    <div className="obj-progress-bar-inner" style={{ width: `${mainObjectiveProgress}%`, transition: 'width 0.6s ease' }}></div>
-                  </div>
-                </div>
-
-                <div className="milestones-grid">
-                  <div className="milestone-item">
-                    <span className="milestone-week">WEEK 1–4</span>
-                    <span className="milestone-title">Foundation Complete</span>
-                  </div>
-                  <div className="milestone-item">
-                    <span className="milestone-week">WEEK 5–6</span>
-                    <span className="milestone-title">SIEM Mastery</span>
-                  </div>
-                  <div className="milestone-item">
-                    <span className="milestone-week">WEEK 7</span>
-                    <span className="milestone-title">Homelab Live</span>
-                  </div>
-                  <div className="milestone-item">
-                    <span className="milestone-week">WEEK 8</span>
-                    <span className="milestone-title">35+ Applications Sent</span>
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            {/* PROJECT BOARD */}
-            <section className="project-board-section">
-              <h2 className="panel-title">Project Board</h2>
-              <hr className="section-divider" />
-              <div className="projects-grid">
-                {activeOrQueuedProjects.map((proj) => {
-                  const status = projectStatus[proj.id] || 'QUEUED';
-                  const progressIdx = projectProgress[proj.id] || 0;
-                  const totalTasks = proj.tasks.length;
-                  const pct = Math.round((progressIdx / totalTasks) * 100);
-                  const currentTask = progressIdx < totalTasks ? proj.tasks[progressIdx] : null;
-                  
-                  // Dynamic styles for status badge
-                  let badgeStyle = {
-                    background: 'rgba(255, 255, 255, 0.03)',
-                    border: '1px solid rgba(255, 255, 255, 0.15)',
-                    color: 'var(--text-muted)',
-                    fontFamily: 'var(--font-mono)',
-                    fontSize: '10px',
-                    fontWeight: 'bold',
-                    padding: '1px 6px'
-                  };
-                  if (status === 'ACTIVE') {
-                    badgeStyle = {
-                      background: 'var(--accent-amber-dim)',
-                      border: '1px solid var(--accent-amber)',
-                      color: 'var(--accent-amber)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '10px',
-                      fontWeight: 'bold',
-                      padding: '1px 6px'
-                    };
-                  } else if (status === 'DONE') {
-                    badgeStyle = {
-                      background: 'var(--accent-green-dim)',
-                      border: '1px solid var(--accent-green)',
-                      color: 'var(--accent-green)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '10px',
-                      fontWeight: 'bold',
-                      padding: '1px 6px'
-                    };
-                  } else if (status === 'ON HOLD') {
-                    badgeStyle = {
-                      background: 'rgba(255, 255, 255, 0.03)',
-                      border: '1px solid rgba(255, 255, 255, 0.3)',
-                      color: 'var(--text-muted)',
-                      fontFamily: 'var(--font-mono)',
-                      fontSize: '10px',
-                      fontWeight: 'bold',
-                      padding: '1px 6px'
-                    };
-                  }
-
-                  return (
-                    <div 
-                      key={proj.id} 
-                      className={`project-card ${status === 'ACTIVE' ? 'active-project' : 'queued'}`}
-                    >
-                      <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                        <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: status === 'ACTIVE' ? 'var(--accent-amber)' : 'var(--text-main)', textTransform: 'uppercase' }}>{proj.name}</span>
-                        <span style={badgeStyle}>
-                          {status}
-                        </span>
-                      </div>
-
-                      <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                        Focus: {proj.focus}
-                      </span>
-
-                      {/* Progress Bar */}
-                      <div className="project-progress-group" style={{ marginBottom: '12px' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '4px' }}>
-                          <span>PROGRESS</span>
-                          <span>{pct}% ({progressIdx}/{totalTasks})</span>
-                        </div>
-                        <div className="xp-bar-outer" style={{ height: '6px' }}>
-                          <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
-                        </div>
-                      </div>
-
-                      {/* Current Phase / Task */}
-                      <div className="project-current-task-group" style={{ marginBottom: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
-                        {currentTask ? (
-                          <>
-                            <span style={{ color: 'var(--accent-amber)', display: 'block', fontWeight: 'bold' }}>PHASE: {currentTask.phase}</span>
-                            <span style={{ color: 'var(--text-muted)', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentTask.name}</span>
-                          </>
-                        ) : (
-                          <span style={{ color: 'var(--accent-green)', display: 'block', fontWeight: 'bold' }}>PHASE: COMPLETE</span>
-                        )}
-                      </div>
-
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed var(--border-color)' }}>
-                        <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)' }}>
-                          Daily Session XP: +{proj.dailyXP}
-                        </span>
-
-                        {/* Status Control Select */}
-                        <select 
-                          value={status} 
-                          onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
-                          className="dark-date-picker"
-                          style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid var(--border-color)', color: 'var(--accent-amber)' }}
-                        >
-                          <option value="QUEUED">QUEUED</option>
-                          <option value="ACTIVE">ACTIVE</option>
-                          <option value="ON HOLD">ON HOLD</option>
-                          <option value="DONE">DONE</option>
-                        </select>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Collapsed COMPLETED PROJECTS row below */}
-              {doneProjects.length > 0 && (
-                <div className="completed-projects-section" style={{ marginTop: '20px' }}>
-                  <div 
-                    className="panel-title-clickable" 
-                    onClick={() => setIsCompletedProjectsExpanded(!isCompletedProjectsExpanded)} 
-                    style={{ 
-                      cursor: 'pointer', 
-                      display: 'flex', 
-                      justifyContent: 'space-between', 
-                      alignItems: 'center',
-                      userSelect: 'none'
-                    }}
-                  >
-                    <h3 className="panel-title" style={{ margin: 0, fontSize: '15px', color: 'var(--accent-green)' }}>🏆 COMPLETED PROJECTS ({doneProjects.length})</h3>
-                    <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
-                      {isCompletedProjectsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
-                    </span>
-                  </div>
-                  <hr className="section-divider" style={{ borderColor: 'rgba(34, 197, 94, 0.3)', margin: '8px 0' }} />
-                  {isCompletedProjectsExpanded && (
-                    <div className="projects-grid">
-                      {doneProjects.map((proj) => {
-                        const totalTasks = proj.tasks.length;
-                        return (
-                          <div 
-                            key={proj.id} 
-                            className="project-card done"
-                            style={{ border: '1px solid var(--accent-green)', boxShadow: '0 0 10px rgba(34, 197, 94, 0.05)' }}
-                          >
-                            <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                              <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-green)', textTransform: 'uppercase' }}>{proj.name}</span>
-                              <span style={{
-                                background: 'var(--accent-green-dim)',
-                                border: '1px solid var(--accent-green)',
-                                color: 'var(--accent-green)',
-                                fontFamily: 'var(--font-mono)',
-                                fontSize: '10px',
-                                fontWeight: 'bold',
-                                padding: '1px 6px'
-                              }}>
-                                DONE
-                              </span>
-                            </div>
-
-                            <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
-                              Focus: {proj.focus}
-                            </span>
-
-                            <div className="project-progress-group" style={{ marginBottom: '12px' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)', marginBottom: '4px' }}>
-                                <span>COMPLETED</span>
-                                <span>100% ({totalTasks}/{totalTasks})</span>
-                              </div>
-                              <div className="xp-bar-outer" style={{ height: '6px', borderColor: 'rgba(34, 197, 94, 0.2)' }}>
-                                <div className="xp-bar-inner" style={{ width: '100%', background: 'var(--accent-green)', boxShadow: '0 0 6px rgba(34, 197, 94, 0.3)' }}></div>
-                              </div>
-                            </div>
-
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed rgba(34, 197, 94, 0.2)' }}>
-                              <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>
-                                Project Complete
-                              </span>
-
-                              {/* Status Control Select to allow moving back */}
-                              <select 
-                                value="DONE" 
-                                onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
-                                className="dark-date-picker"
-                                style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid rgba(34, 197, 94, 0.3)', color: 'var(--accent-green)' }}
-                              >
-                                <option value="DONE">DONE</option>
-                                <option value="QUEUED">QUEUED</option>
-                                <option value="ACTIVE">ACTIVE</option>
-                                <option value="ON HOLD">ON HOLD</option>
-                              </select>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </section>
-
-            {/* SKILL MAP SECTION */}
-            <section className="skill-map-section">
-              <div 
-                className="panel-title-clickable" 
-                onClick={() => setIsSkillMapExpanded(prev => { const next = !prev; storage.setItem('isSkillMapExpanded', String(next)); return next; })} 
-                style={{ 
-                  cursor: 'pointer', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  userSelect: 'none'
-                }}
-              >
-                <h2 className="panel-title" style={{ margin: 0 }}>🗺️ SKILL MAP</h2>
-                <span 
-                  className="collapse-arrow" 
-                  style={{ 
-                    color: 'var(--accent-amber)', 
-                    fontFamily: 'var(--font-mono)', 
+            {(() => {
+              const chain = CHAINS[chainId];
+              if (!chain) return null;
+              const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
+              const currentIdx = chainProgress[chainId] !== undefined ? chainProgress[chainId] : 0;
+              
+              if (currentIdx >= tasksArray.length) {
+                return (
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px dashed var(--accent-green)',
+                    color: 'var(--accent-green)',
+                    padding: '10px 14px',
                     fontSize: '13px',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  {isSkillMapExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
-                </span>
-              </div>
-              <hr className="section-divider" />
+                    fontFamily: 'var(--font-mono)',
+                    textAlign: 'center',
+                    textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                  }}>
+                    [ {chainId} CHAIN COMPLETE — ALL STEPS CLEARED ]
+                  </div>
+                );
+              }
 
-              {isSkillMapExpanded && (
-                <div className="skill-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
-                  {['NETWORKING', 'LINUX', 'SOC OPERATIONS', 'WEB SECURITY', 'TOOLS MASTERY', 'ACTIVE DIRECTORY', 'INTERVIEW PREP', 'THM / LABS'].map(domain => {
-                    const chain = CHAINS[domain];
-                    const completedCount = chainProgress[domain] || 0;
-                    const totalSteps = chain.length;
-                    const pct = Math.round((completedCount / totalSteps) * 100);
-                    
+              const visible = [];
+              let idx = currentIdx;
+              while (idx < tasksArray.length) {
+                const taskId = `chain:${chainId}:${idx}`;
+                const isCompleted = dailyState.completedTaskIds.includes(taskId);
+                visible.push({
+                  id: taskId,
+                  stepIdx: idx,
+                  task: tasksArray[idx],
+                  completed: isCompleted
+                });
+                
+                if (isCompleted) {
+                  idx++;
+                } else {
+                  break;
+                }
+              }
+
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  {visible.map(({ id, stepIdx, task, completed }) => {
+                    const isJustUnlocked = justUnlockedStepId === id;
+                    const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                    const briefing = flavors[id]?.briefing;
                     return (
                       <div 
-                        key={domain} 
-                        className="skill-card" 
-                        style={{ 
-                          background: 'var(--bg-card)', 
-                          border: '1px solid var(--border-color)', 
-                          padding: '16px',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: '12px'
-                        }}
+                        key={id} 
+                        className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                        onClick={(e) => handleToggleMission(id, task.xp, true, chainId, stepIdx, e)}
+                        style={{ width: '100%', padding: '10px 14px' }}
                       >
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '15px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
-                            {domain}
-                          </span>
-                          <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-amber)' }}>
-                            {completedCount} / {totalSteps} ({pct}%)
-                          </span>
+                        <div className="checkbox-container" style={{ width: '16px', height: '16px' }}>
+                          <span className="checkmark-icon"></span>
                         </div>
-                        
-                        <div className="xp-bar-outer" style={{ height: '6px' }}>
-                          <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
-                        </div>
-
-                        <div className="skill-steps-list" style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
-                          {chain.map((step, idx) => {
-                            const isCleared = idx < completedCount;
-                            return (
-                              <div 
-                                key={idx} 
-                                style={{ 
-                                  fontSize: '11px', 
-                                  fontFamily: 'var(--font-mono)', 
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  color: isCleared ? 'var(--accent-green)' : 'var(--text-muted)',
-                                  textDecoration: isCleared ? 'line-through' : 'none'
-                                }}
-                              >
-                                <span>{isCleared ? '✓' : '○'}</span>
-                                <span style={{ opacity: isCleared ? 0.6 : 1 }}>
-                                  {step.title}
-                                </span>
-                              </div>
-                            );
-                          })}
+                        <div className="mission-details" style={{ gap: '4px' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                            <span className="mission-title" style={{ fontSize: '13px' }}>{displayTitle}</span>
+                            {isJustUnlocked && (
+                              <span style={{ 
+                                fontSize: '9px', 
+                                fontFamily: 'var(--font-mono)', 
+                                color: 'var(--accent-green)', 
+                                border: '1px solid var(--accent-green)', 
+                                padding: '0 3px', 
+                                marginLeft: '6px',
+                                textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                whiteSpace: 'nowrap'
+                              }}>
+                                UNLOCKED
+                              </span>
+                            )}
+                          </div>
+                          {briefing && (
+                            <span className="mission-briefing" style={{ 
+                              display: 'block', 
+                              fontSize: '10px', 
+                              color: 'var(--text-muted)', 
+                              fontFamily: 'var(--font-mono)' 
+                            }}>
+                              {briefing}
+                            </span>
+                          )}
+                          <div className="mission-meta">
+                            <span className={`badge badge-${task.category.toLowerCase()}`} style={{ fontSize: '9px', padding: '0px 4px' }}>{task.category}</span>
+                            <span className="xp-reward" style={{ fontSize: '11px' }}>+{task.xp} XP</span>
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              )}
-            </section>
+              );
+            })()}
+          </div>
 
-            {/* PROJECT OPS section */}
-            {activeProject && renderedOpsTasks.length > 0 && (
-              <section className="project-ops-section">
-                <h2 className="panel-title">Project Ops // {activeProject.name}</h2>
-                <hr className="section-divider" />
-                <div className="missions-grid" style={{ marginBottom: '24px' }}>
-                  {renderedOpsTasks.map(({ task, completed }) => {
-                    const isJustUnlocked = justUnlockedStepId === task.id;
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+              &gt; ACTIVE PROJECT OPS
+            </span>
+            {activeProject ? (
+              (() => {
+                const progIdx = projectProgress[activeProject.id] || 0;
+                const completedToday = projectCompletedTasks[activeProject.id] || [];
+                
+                if (progIdx < activeProject.tasks.length) {
+                  const task = activeProject.tasks[progIdx];
+                  const isCompleted = completedToday.includes(task.id);
+                  return (
+                    <div 
+                      key={task.id} 
+                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                      onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
+                      style={{ width: '100%', padding: '10px 14px' }}
+                    >
+                      <div className="checkbox-container" style={{ width: '16px', height: '16px' }}>
+                        <span className="checkmark-icon"></span>
+                      </div>
+                      <div className="mission-details" style={{ gap: '4px' }}>
+                        <span className="mission-title" style={{ fontSize: '13px' }}>
+                          {task.name}
+                        </span>
+                        <div className="mission-meta">
+                          <span className="badge badge-ops" style={{ fontSize: '9px', padding: '0 4px', background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
+                            {activeProject.name} // {task.phase}
+                          </span>
+                          <span className="xp-reward" style={{ fontSize: '11px' }}>+{task.xp} XP</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                } else {
+                  return (
+                    <div style={{
+                      background: 'rgba(34, 197, 94, 0.1)',
+                      border: '1px dashed var(--accent-green)',
+                      color: 'var(--accent-green)',
+                      padding: '10px 14px',
+                      fontSize: '13px',
+                      fontFamily: 'var(--font-mono)',
+                      textAlign: 'center',
+                      textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                    }}>
+                      [ ACTIVE PROJECT {activeProject.name} COMPLETE ]
+                    </div>
+                  );
+                }
+              })()
+            ) : (
+              <div style={{
+                background: 'rgba(255, 255, 255, 0.02)',
+                border: '1px dashed var(--border-color)',
+                color: 'var(--text-muted)',
+                padding: '10px 14px',
+                fontSize: '13px',
+                fontFamily: 'var(--font-mono)',
+                textAlign: 'center'
+              }}>
+                [ NO ACTIVE PROJECT DEPLOYED ]
+              </div>
+            )}
+          </div>
+
+          <div className="briefing-stats-row" style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 12px', fontSize: '12px' }}>
+            <span className="briefing-stat-item">
+              [ XP TODAY: <span style={{ color: 'var(--accent-green)', fontWeight: 'bold' }}>{xpToday}</span> ]
+            </span>
+            <span className="briefing-stat-item">
+              [ STREAK: <span style={{ color: 'var(--accent-orange)', fontWeight: 'bold' }}>{profile.streak}</span> ]
+            </span>
+            <span className="briefing-stat-item">
+              [ TASKS LEFT: <span style={{ color: 'var(--accent-coral)', fontWeight: 'bold' }}>{tasksLeft}</span> ]
+            </span>
+          </div>
+
+        </div>
+      </section>
+    );
+  };
+
+  const renderPriorityMissions = () => {
+    const priorityMissions = (() => {
+      const uncompletedFixed = FIXED_TASKS.filter(t => !dailyState.completedTaskIds.includes(t.id));
+      const sorted = [...uncompletedFixed].sort((a, b) => b.xp - a.xp);
+      return sorted.slice(0, 4);
+    })();
+
+    return (
+      <section className="daily-ops-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h2 className="panel-title">Priority Missions</h2>
+        <hr className="section-divider" />
+        <div className="missions-grid">
+          {priorityMissions.map(task => {
+            const isCompleted = dailyState.completedTaskIds.includes(task.id);
+            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+            const briefing = flavors[task.id]?.briefing;
+            return (
+              <div 
+                key={task.id} 
+                className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+              >
+                <div className="checkbox-container">
+                  <span className="checkmark-icon"></span>
+                </div>
+                <div className="mission-details">
+                  <span className="mission-title">{displayTitle}</span>
+                  {briefing && (
+                    <span className="mission-briefing" style={{ 
+                      display: 'block', 
+                      fontSize: '11px', 
+                      color: 'var(--text-muted)', 
+                      marginTop: '2px', 
+                      fontFamily: 'var(--font-mono)' 
+                    }}>
+                      {briefing}
+                    </span>
+                  )}
+                  <div className="mission-meta">
+                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                    <span className="xp-reward">+{task.xp} XP</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div style={{ marginTop: '12px', textAlign: 'center' }}>
+          <button 
+            onClick={() => setActivePage('missions')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--accent-amber)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '14px',
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              letterSpacing: '0.05em'
+            }}
+          >
+            [ VIEW ALL MISSIONS → ]
+          </button>
+        </div>
+      </section>
+    );
+  };
+
+  const renderMainObjectiveCard = () => {
+    return (
+      <section className="main-objective-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h2 className="panel-title">Main Objective</h2>
+        <hr className="section-divider" />
+        <div className="main-objective-card">
+          <div className="obj-header">
+            <div className="obj-title-group">
+              <h3>Land First Cybersecurity Role</h3>
+            </div>
+            <span className="status-badge">ACTIVE</span>
+          </div>
+
+          <div className="obj-progress-group">
+            <div className="obj-progress-header">
+              <span>STAGE: {getStageLabel(mainObjectiveProgress)}</span>
+              <span>{mainObjectiveProgress}%</span>
+            </div>
+            <div className="obj-progress-bar-outer">
+              <div className="obj-progress-bar-inner" style={{ width: `${mainObjectiveProgress}%`, transition: 'width 0.6s ease' }}></div>
+            </div>
+          </div>
+
+          <div className="milestones-grid">
+            <div className="milestone-item">
+              <span className="milestone-week">WEEK 1–4</span>
+              <span className="milestone-title">Foundation Complete</span>
+            </div>
+            <div className="milestone-item">
+              <span className="milestone-week">WEEK 5–6</span>
+              <span className="milestone-title">SIEM Mastery</span>
+            </div>
+            <div className="milestone-item">
+              <span className="milestone-week">WEEK 7</span>
+              <span className="milestone-title">Homelab Live</span>
+            </div>
+            <div className="milestone-item">
+              <span className="milestone-week">WEEK 8</span>
+              <span className="milestone-title">35+ Applications Sent</span>
+            </div>
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  const renderProjectOps = () => {
+    if (!activeProject || renderedOpsTasks.length === 0) return null;
+    return (
+      <section className="project-ops-section">
+        <h2 className="panel-title">Project Ops // {activeProject.name}</h2>
+        <hr className="section-divider" />
+        <div className="missions-grid" style={{ marginBottom: '24px' }}>
+          {renderedOpsTasks.map(({ task, completed }) => {
+            const isJustUnlocked = justUnlockedStepId === task.id;
+            return (
+              <div 
+                key={task.id} 
+                className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
+              >
+                <div className="checkbox-container">
+                  <span className="checkmark-icon"></span>
+                </div>
+                <div className="mission-details">
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                    <span className="mission-title">{task.name}</span>
+                    {isJustUnlocked && (
+                      <span style={{ 
+                        fontSize: '10px', 
+                        fontFamily: 'var(--font-mono)', 
+                        color: 'var(--accent-green)', 
+                        border: '1px solid var(--accent-green)', 
+                        padding: '0 4px', 
+                        marginLeft: '8px',
+                        textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                        whiteSpace: 'nowrap'
+                      }}>
+                        UNLOCKED
+                      </span>
+                    )}
+                  </div>
+                  <div className="mission-meta">
+                    <span className="badge badge-ops" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
+                      {task.phase}
+                    </span>
+                    <span className="xp-reward">+{task.xp} XP</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
+  const renderDailyOps = () => {
+    return (
+      <section className="daily-ops-section">
+        <h2 className="panel-title">Daily Ops</h2>
+        <hr className="section-divider" />
+        <div className="missions-grid">
+          {DAILY_OPS_FIXED_TASKS.map(task => {
+            const isCompleted = dailyState.completedTaskIds.includes(task.id);
+            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+            const briefing = flavors[task.id]?.briefing;
+            return (
+              <div 
+                key={task.id} 
+                className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+              >
+                <div className="checkbox-container">
+                  <span className="checkmark-icon"></span>
+                </div>
+                <div className="mission-details">
+                  <span className="mission-title">{displayTitle}</span>
+                  {briefing && (
+                    <span className="mission-briefing" style={{ 
+                      display: 'block', 
+                      fontSize: '11px', 
+                      color: 'var(--text-muted)', 
+                      marginTop: '2px', 
+                      fontFamily: 'var(--font-mono)' 
+                    }}>
+                      {briefing}
+                    </span>
+                  )}
+                  <div className="mission-meta">
+                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                    <span className="xp-reward">+{task.xp} XP</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+
+          {Object.keys(CHAINS).map(chainName => {
+            const mappedActive = mapDomainKey(todaysDomain);
+            if (chainName !== mappedActive) return null;
+
+            const visibleSteps = getVisibleChainSteps(chainName);
+            return (
+              <div key={chainName} style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
+                <div style={{
+                  fontFamily: 'var(--font-mono)',
+                  color: 'var(--accent-amber)',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  fontVariant: 'small-caps',
+                  marginBottom: '6px'
+                }}>
+                  TODAY'S SKILL: {chainName}
+                </div>
+                {visibleSteps.length === 0 ? (
+                  <div style={{
+                    background: 'rgba(34, 197, 94, 0.1)',
+                    border: '1px dashed var(--accent-green)',
+                    color: 'var(--accent-green)',
+                    padding: '12px 16px',
+                    fontSize: '13px',
+                    fontFamily: 'var(--font-mono)',
+                    textAlign: 'center',
+                    textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                  }}>
+                    [ {chainName} CHAIN COMPLETE — ALL STEPS CLEARED ]
+                  </div>
+                ) : (
+                  visibleSteps.map(({ id, stepIdx, task }) => {
+                    const isCompleted = dailyState.completedTaskIds.includes(id);
+                    const isJustUnlocked = justUnlockedStepId === id;
+                    const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                    const briefing = flavors[id]?.briefing;
                     return (
                       <div 
-                        key={task.id} 
-                        className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                        onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
+                        key={id} 
+                        className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                        onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
                       >
                         <div className="checkbox-container">
                           <span className="checkmark-icon"></span>
                         </div>
                         <div className="mission-details">
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                            <span className="mission-title">{task.name}</span>
+                            <span className="mission-title">{displayTitle}</span>
                             {isJustUnlocked && (
                               <span style={{ 
                                 fontSize: '10px', 
@@ -2807,802 +2838,1198 @@ export default function App() {
                               </span>
                             )}
                           </div>
-                          <div className="mission-meta">
-                            <span className="badge badge-ops" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
-                              {task.phase}
+                          {briefing && (
+                            <span className="mission-briefing" style={{ 
+                              display: 'block', 
+                              fontSize: '11px', 
+                              color: 'var(--text-muted)', 
+                              marginTop: '2px', 
+                              fontFamily: 'var(--font-mono)' 
+                            }}>
+                              {briefing}
                             </span>
+                          )}
+                          <div className="mission-meta">
+                            <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
                             <span className="xp-reward">+{task.xp} XP</span>
                           </div>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* DAILY OPS Grid */}
-            <section className="daily-ops-section">
-              <h2 className="panel-title">Daily Ops</h2>
-              <hr className="section-divider" />
-              <div className="missions-grid">
-                {/* Render Type A - Non-physical/non-discipline fixed daily tasks */}
-                {DAILY_OPS_FIXED_TASKS.map(task => {
-                  const isCompleted = dailyState.completedTaskIds.includes(task.id);
-                  const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
-                  const briefing = flavors[task.id]?.briefing;
-                  return (
-                    <div 
-                      key={task.id} 
-                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                      onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
-                    >
-                      <div className="checkbox-container">
-                        <span className="checkmark-icon"></span>
-                      </div>
-                      <div className="mission-details">
-                        <span className="mission-title">{displayTitle}</span>
-                        {briefing && (
-                          <span className="mission-briefing" style={{ 
-                            display: 'block', 
-                            fontSize: '11px', 
-                            color: 'var(--text-muted)', 
-                            marginTop: '2px', 
-                            fontFamily: 'var(--font-mono)' 
-                          }}>
-                            {briefing}
-                          </span>
-                        )}
-                        <div className="mission-meta">
-                          <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                          <span className="xp-reward">+{task.xp} XP</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-
-                {/* Render Type B - Active and Completed Progressive Chain tasks */}
-                {Object.keys(CHAINS).map(chainName => {
-                  const mappedActive = mapDomainKey(todaysDomain);
-                  if (chainName !== mappedActive) return null;
-
-                  const visibleSteps = getVisibleChainSteps(chainName);
-                  return (
-                    <div key={chainName} style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                      <div style={{
-                        fontFamily: 'var(--font-mono)',
-                        color: 'var(--accent-amber)',
-                        fontSize: '11px',
-                        fontWeight: 'bold',
-                        letterSpacing: '0.1em',
-                        textTransform: 'uppercase',
-                        fontVariant: 'small-caps',
-                        marginBottom: '6px'
-                      }}>
-                        TODAY'S SKILL: {chainName}
-                      </div>
-                      {visibleSteps.length === 0 ? (
-                        <div style={{
-                          background: 'rgba(34, 197, 94, 0.1)',
-                          border: '1px dashed var(--accent-green)',
-                          color: 'var(--accent-green)',
-                          padding: '12px 16px',
-                          fontSize: '13px',
-                          fontFamily: 'var(--font-mono)',
-                          textAlign: 'center',
-                          textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
-                        }}>
-                          [ {chainName} CHAIN COMPLETE — ALL STEPS CLEARED ]
-                        </div>
-                      ) : (
-                        visibleSteps.map(({ id, stepIdx, task }) => {
-                          const isCompleted = dailyState.completedTaskIds.includes(id);
-                          const isJustUnlocked = justUnlockedStepId === id;
-                          const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
-                          const briefing = flavors[id]?.briefing;
-                          return (
-                            <div 
-                              key={id} 
-                              className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                              onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
-                            >
-                              <div className="checkbox-container">
-                                <span className="checkmark-icon"></span>
-                              </div>
-                              <div className="mission-details">
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                                  <span className="mission-title">{displayTitle}</span>
-                                  {isJustUnlocked && (
-                                    <span style={{ 
-                                      fontSize: '10px', 
-                                      fontFamily: 'var(--font-mono)', 
-                                      color: 'var(--accent-green)', 
-                                      border: '1px solid var(--accent-green)', 
-                                      padding: '0 4px', 
-                                      marginLeft: '8px',
-                                      textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
-                                      whiteSpace: 'nowrap'
-                                    }}>
-                                      UNLOCKED
-                                    </span>
-                                  )}
-                                </div>
-                                {briefing && (
-                                  <span className="mission-briefing" style={{ 
-                                    display: 'block', 
-                                    fontSize: '11px', 
-                                    color: 'var(--text-muted)', 
-                                    marginTop: '2px', 
-                                    fontFamily: 'var(--font-mono)' 
-                                  }}>
-                                    {briefing}
-                                  </span>
-                                )}
-                                <div className="mission-meta">
-                                  <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                                  <span className="xp-reward">+{task.xp} XP</span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  );
-                })}
+                  })
+                )}
               </div>
-            </section>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
 
-            {/* SIDE OPS section */}
-            <section className="side-ops-section">
-              <h2 className="panel-title">Side Ops</h2>
-              <hr className="section-divider" />
-              <div className="missions-grid">
-                {/* Render Type A - Physical and Discipline fixed daily tasks */}
-                {SIDE_OPS_FIXED_TASKS.map(task => {
-                  const isCompleted = dailyState.completedTaskIds.includes(task.id);
-                  const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
-                  const briefing = flavors[task.id]?.briefing;
-                  return (
-                    <div 
-                      key={task.id} 
-                      className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                      onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
-                    >
-                      <div className="checkbox-container">
-                        <span className="checkmark-icon"></span>
-                      </div>
-                      <div className="mission-details">
-                        <span className="mission-title">{displayTitle}</span>
-                        {briefing && (
-                          <span className="mission-briefing" style={{ 
-                            display: 'block', 
-                            fontSize: '11px', 
-                            color: 'var(--text-muted)', 
-                            marginTop: '2px', 
-                            fontFamily: 'var(--font-mono)' 
-                          }}>
-                            {briefing}
-                          </span>
-                        )}
-                        <div className="mission-meta">
-                          <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                          <span className="xp-reward">+{task.xp} XP</span>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* LIFE METRICS SECTION */}
-            <section className="life-metrics-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
+  const renderSideOps = () => {
+    return (
+      <section className="side-ops-section">
+        <h2 className="panel-title">Side Ops</h2>
+        <hr className="section-divider" />
+        <div className="missions-grid">
+          {SIDE_OPS_FIXED_TASKS.map(task => {
+            const isCompleted = dailyState.completedTaskIds.includes(task.id);
+            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+            const briefing = flavors[task.id]?.briefing;
+            return (
               <div 
-                className="panel-title-clickable" 
-                onClick={() => setIsLifeMetricsExpanded(prev => { const next = !prev; storage.setItem('isLifeMetricsExpanded', String(next)); return next; })} 
-                style={{ 
-                  cursor: 'pointer', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  userSelect: 'none'
-                }}
+                key={task.id} 
+                className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
               >
-                <h2 className="panel-title" style={{ margin: 0 }}>📊 LIFE METRICS</h2>
-                <span 
-                  className="collapse-arrow" 
-                  style={{ 
-                    color: 'var(--accent-amber)', 
-                    fontFamily: 'var(--font-mono)', 
-                    fontSize: '13px',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  {isLifeMetricsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
-                </span>
+                <div className="checkbox-container">
+                  <span className="checkmark-icon"></span>
+                </div>
+                <div className="mission-details">
+                  <span className="mission-title">{displayTitle}</span>
+                  {briefing && (
+                    <span className="mission-briefing" style={{ 
+                      display: 'block', 
+                      fontSize: '11px', 
+                      color: 'var(--text-muted)', 
+                      marginTop: '2px', 
+                      fontFamily: 'var(--font-mono)' 
+                    }}>
+                      {briefing}
+                    </span>
+                  )}
+                  <div className="mission-meta">
+                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                    <span className="xp-reward">+{task.xp} XP</span>
+                  </div>
+                </div>
               </div>
-              <hr className="section-divider" />
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
 
-              {isLifeMetricsExpanded && (() => {
-                const c30 = getCompletedCountsForLast30Days();
-                const careerNum = (c30['fixed:apply_roles'] || 0) + (c30['fixed:cold_email'] || 0) + (c30['fixed:update_linkedin'] || 0);
-                const physicalNum = (c30['fixed:post_nap_exercise'] || 0) + (c30['fixed:drink_water'] || 0) + (c30['fixed:sleep_early'] || 0);
-                const mentalNum = (c30['fixed:morning_ritual'] || 0) + (c30['fixed:after_action_report'] || 0);
-                const socialNum = c30['fixed:evening_patrol'] || 0;
+  const renderProjectBoard = () => {
+    return (
+      <section className="project-board-section">
+        <h2 className="panel-title">Project Board</h2>
+        <hr className="section-divider" />
+        <div className="projects-grid">
+          {activeOrQueuedProjects.map((proj) => {
+            const status = projectStatus[proj.id] || 'QUEUED';
+            const progressIdx = projectProgress[proj.id] || 0;
+            const totalTasks = proj.tasks.length;
+            const pct = Math.round((progressIdx / totalTasks) * 100);
+            const currentTask = progressIdx < totalTasks ? proj.tasks[progressIdx] : null;
+            
+            let badgeStyle = {
+              background: 'rgba(255, 255, 255, 0.03)',
+              border: '1px solid rgba(255, 255, 255, 0.15)',
+              color: 'var(--text-muted)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '10px',
+              fontWeight: 'bold',
+              padding: '1px 6px'
+            };
+            if (status === 'ACTIVE') {
+              badgeStyle = {
+                background: 'var(--accent-amber-dim)',
+                border: '1px solid var(--accent-amber)',
+                color: 'var(--accent-amber)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                padding: '1px 6px'
+              };
+            } else if (status === 'DONE') {
+              badgeStyle = {
+                background: 'var(--accent-green-dim)',
+                border: '1px solid var(--accent-green)',
+                color: 'var(--accent-green)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                padding: '1px 6px'
+              };
+            } else if (status === 'ON HOLD') {
+              badgeStyle = {
+                background: 'rgba(255, 255, 255, 0.03)',
+                border: '1px solid rgba(255, 255, 255, 0.3)',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '10px',
+                fontWeight: 'bold',
+                padding: '1px 6px'
+              };
+            }
 
-                const careerPct = Math.min(100, Math.round((careerNum / 90) * 100));
-                const physicalPct = Math.min(100, Math.round((physicalNum / 90) * 100));
-                const mentalPct = Math.min(100, Math.round((mentalNum / 60) * 100));
-                const socialPct = Math.min(100, Math.round((socialNum / 30) * 100));
+            return (
+              <div 
+                key={proj.id} 
+                className={`project-card ${status === 'ACTIVE' ? 'active-project' : 'queued'}`}
+              >
+                <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: status === 'ACTIVE' ? 'var(--accent-amber)' : 'var(--text-main)', textTransform: 'uppercase' }}>{proj.name}</span>
+                  <span style={badgeStyle}>
+                    {status}
+                  </span>
+                </div>
 
-                const metrics = [
-                  { name: 'CAREER MOMENTUM', pct: careerPct, label: 'Job hunt execution' },
-                  { name: 'PHYSICAL CONDITION', pct: physicalPct, label: 'Health consistency' },
-                  { name: 'MENTAL DISCIPLINE', pct: mentalPct, label: 'Routine adherence' },
-                  { name: 'SOCIAL BATTERY', pct: socialPct, label: 'Real world presence' }
-                ];
+                <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                  Focus: {proj.focus}
+                </span>
 
-                return (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                    <div className="metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-                      {metrics.map(metric => (
-                        <div 
-                          key={metric.name} 
-                          className="metric-card" 
-                          style={{ 
-                            background: 'var(--bg-card)', 
-                            border: '1px solid var(--border-color)', 
-                            padding: '16px',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '10px'
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
-                              {metric.name}
-                            </span>
-                            <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--accent-amber)' }}>
-                              {metric.pct}%
-                            </span>
-                          </div>
-                          
-                          <div className="xp-bar-outer" style={{ height: '8px' }}>
-                            <div className="xp-bar-inner" style={{ width: `${metric.pct}%`, transition: 'width 0.6s ease' }}></div>
-                          </div>
-                          
-                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
-                            {metric.label}
-                          </span>
+                <div className="project-progress-group" style={{ marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)', marginBottom: '4px' }}>
+                    <span>PROGRESS</span>
+                    <span>{pct}% ({progressIdx}/{totalTasks})</span>
+                  </div>
+                  <div className="xp-bar-outer" style={{ height: '6px' }}>
+                    <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
+                  </div>
+                </div>
+
+                <div className="project-current-task-group" style={{ marginBottom: '12px', fontFamily: 'var(--font-mono)', fontSize: '11px' }}>
+                  {currentTask ? (
+                    <>
+                      <span style={{ color: 'var(--accent-amber)', display: 'block', fontWeight: 'bold' }}>PHASE: {currentTask.phase}</span>
+                      <span style={{ color: 'var(--text-muted)', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>{currentTask.name}</span>
+                    </>
+                  ) : (
+                    <span style={{ color: 'var(--accent-green)', display: 'block', fontWeight: 'bold' }}>PHASE: COMPLETE</span>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px solid var(--border-color)' }}>
+                  <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)' }}>
+                    Daily Session XP: +{proj.dailyXP}
+                  </span>
+
+                  <select 
+                    value={status} 
+                    onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
+                    className="dark-date-picker"
+                    style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid var(--border-color)', color: 'var(--accent-amber)' }}
+                  >
+                    <option value="QUEUED">QUEUED</option>
+                    <option value="ACTIVE">ACTIVE</option>
+                    <option value="ON HOLD">ON HOLD</option>
+                    <option value="DONE">DONE</option>
+                  </select>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {doneProjects.length > 0 && (
+          <div className="completed-projects-section" style={{ marginTop: '20px' }}>
+            <div 
+              className="panel-title-clickable" 
+              onClick={() => setIsCompletedProjectsExpanded(!isCompletedProjectsExpanded)} 
+              style={{ 
+                cursor: 'pointer', 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                userSelect: 'none'
+              }}
+            >
+              <h3 className="panel-title" style={{ margin: 0, fontSize: '15px', color: 'var(--accent-green)' }}>🏆 COMPLETED PROJECTS ({doneProjects.length})</h3>
+              <span style={{ color: 'var(--accent-green)', fontFamily: 'var(--font-mono)', fontSize: '12px' }}>
+                {isCompletedProjectsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+              </span>
+            </div>
+            <hr className="section-divider" style={{ borderColor: 'rgba(34, 197, 94, 0.3)', margin: '8px 0' }} />
+            {isCompletedProjectsExpanded && (
+              <div className="projects-grid">
+                {doneProjects.map((proj) => {
+                  const totalTasks = proj.tasks.length;
+                  return (
+                    <div 
+                      key={proj.id} 
+                      className="project-card done"
+                      style={{ border: '1px solid var(--accent-green)', boxShadow: '0 0 10px rgba(34, 197, 94, 0.05)' }}
+                    >
+                      <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                        <span className="project-name" style={{ fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-green)', textTransform: 'uppercase' }}>{proj.name}</span>
+                        <span style={{
+                          background: 'var(--accent-green-dim)',
+                          border: '1px solid var(--accent-green)',
+                          color: 'var(--accent-green)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '10px',
+                          fontWeight: 'bold',
+                          padding: '1px 6px'
+                        }}>
+                          DONE
+                        </span>
+                      </div>
+
+                      <span className="project-focus" style={{ display: 'block', fontSize: '12px', color: 'var(--text-muted)', marginBottom: '8px' }}>
+                        Focus: {proj.focus}
+                      </span>
+
+                      <div className="project-progress-group" style={{ marginBottom: '12px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)', marginBottom: '4px' }}>
+                          <span>COMPLETED</span>
+                          <span>100% ({totalTasks}/{totalTasks})</span>
                         </div>
-                      ))}
+                        <div className="xp-bar-outer" style={{ height: '6px', borderColor: 'rgba(34, 197, 94, 0.2)' }}>
+                          <div className="xp-bar-inner" style={{ width: '100%', background: 'var(--accent-green)', boxShadow: '0 0 6px rgba(34, 197, 94, 0.3)' }}></div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 'auto', paddingTop: '8px', borderTop: '1px dashed rgba(34, 197, 94, 0.2)' }}>
+                        <span className="project-xp-reward" style={{ fontSize: '11px', fontFamily: 'var(--font-mono)', color: 'var(--accent-green)' }}>
+                          Project Complete
+                        </span>
+
+                        <select 
+                          value="DONE" 
+                          onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
+                          className="dark-date-picker"
+                          style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid rgba(34, 197, 94, 0.3)', color: 'var(--accent-green)' }}
+                        >
+                          <option value="DONE">DONE</option>
+                          <option value="QUEUED">QUEUED</option>
+                          <option value="ACTIVE">ACTIVE</option>
+                          <option value="ON HOLD">ON HOLD</option>
+                        </select>
+                      </div>
                     </div>
-                    <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
-                      30-DAY SNAPSHOT: {get30DayRangeString()}
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const renderLifeMetrics = () => {
+    return (
+      <section className="life-metrics-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
+        <div 
+          className="panel-title-clickable" 
+          onClick={() => setIsLifeMetricsExpanded(prev => { const next = !prev; storage.setItem('isLifeMetricsExpanded', String(next)); return next; })} 
+          style={{ 
+            cursor: 'pointer', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            userSelect: 'none'
+          }}
+        >
+          <h2 className="panel-title" style={{ margin: 0 }}>📊 LIFE METRICS</h2>
+          <span 
+            className="collapse-arrow" 
+            style={{ 
+              color: 'var(--accent-amber)', 
+              fontFamily: 'var(--font-mono)', 
+              fontSize: '13px',
+              letterSpacing: '0.05em'
+            }}
+          >
+            {isLifeMetricsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+          </span>
+        </div>
+        <hr className="section-divider" />
+
+        {isLifeMetricsExpanded && (() => {
+          const c30 = getCompletedCountsForLast30Days();
+          const careerNum = (c30['fixed:apply_roles'] || 0) + (c30['fixed:cold_email'] || 0) + (c30['fixed:update_linkedin'] || 0);
+          const physicalNum = (c30['fixed:post_nap_exercise'] || 0) + (c30['fixed:drink_water'] || 0) + (c30['fixed:sleep_early'] || 0);
+          const mentalNum = (c30['fixed:morning_ritual'] || 0) + (c30['fixed:after_action_report'] || 0);
+          const socialNum = c30['fixed:evening_patrol'] || 0;
+
+          const careerPct = Math.min(100, Math.round((careerNum / 90) * 100));
+          const physicalPct = Math.min(100, Math.round((physicalNum / 90) * 100));
+          const mentalPct = Math.min(100, Math.round((mentalNum / 60) * 100));
+          const socialPct = Math.min(100, Math.round((socialNum / 30) * 100));
+
+          const metrics = [
+            { name: 'CAREER MOMENTUM', pct: careerPct, label: 'Job hunt execution' },
+            { name: 'PHYSICAL CONDITION', pct: physicalPct, label: 'Health consistency' },
+            { name: 'MENTAL DISCIPLINE', pct: mentalPct, label: 'Routine adherence' },
+            { name: 'SOCIAL BATTERY', pct: socialPct, label: 'Real world presence' }
+          ];
+
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+              <div className="metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
+                {metrics.map(metric => (
+                  <div 
+                    key={metric.name} 
+                    className="metric-card" 
+                    style={{ 
+                      background: 'var(--bg-card)', 
+                      border: '1px solid var(--border-color)', 
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '10px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '14px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
+                        {metric.name}
+                      </span>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--accent-amber)' }}>
+                        {metric.pct}%
+                      </span>
                     </div>
+                    
+                    <div className="xp-bar-outer" style={{ height: '8px' }}>
+                      <div className="xp-bar-inner" style={{ width: `${metric.pct}%`, transition: 'width 0.6s ease' }}></div>
+                    </div>
+                    
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                      {metric.label}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', borderTop: '1px dashed var(--border-color)', paddingTop: '10px' }}>
+                30-DAY SNAPSHOT: {get30DayRangeString()}
+              </div>
+            </div>
+          );
+        })()}
+      </section>
+    );
+  };
+
+  const renderMissionLogs = () => {
+    return (
+      <section className="mission-logs-section">
+        <div 
+          className="panel-title-clickable" 
+          onClick={() => setIsLogsExpanded(!isLogsExpanded)} 
+          style={{ 
+            cursor: 'pointer', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            userSelect: 'none'
+          }}
+        >
+          <h2 className="panel-title" style={{ margin: 0 }}>📊 MISSION LOGS</h2>
+          <span 
+            className="collapse-arrow" 
+            style={{ 
+              color: 'var(--accent-amber)', 
+              fontFamily: 'var(--font-mono)', 
+              fontSize: '13px',
+              letterSpacing: '0.05em'
+            }}
+          >
+            {isLogsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+          </span>
+        </div>
+        <hr className="section-divider" />
+        
+        {isLogsExpanded && (
+          <div className="logs-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            
+            {/* Date picker lookup */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>
+                LOOKUP DATE:
+              </span>
+              <input 
+                type="date" 
+                className="dark-date-picker" 
+                value={lookupDate} 
+                onChange={(e) => setLookupDate(e.target.value)}
+              />
+            </div>
+
+            {(() => {
+              const savedLogsRaw = storage.getItem(`log:${lookupDate}`);
+              if (!savedLogsRaw) {
+                return (
+                  <div 
+                    className="empty-logs-msg" 
+                    style={{ 
+                      padding: '24px', 
+                      border: '1px dashed var(--border-color)', 
+                      color: 'var(--text-muted)', 
+                      fontFamily: 'var(--font-mono)', 
+                      fontSize: '13px', 
+                      textAlign: 'center',
+                      background: 'rgba(0, 0, 0, 0.2)'
+                    }}
+                  >
+                    NO DATA FOR THIS DATE
                   </div>
                 );
-              })()}
-            </section>
+              }
 
+              try {
+                const dayLogs = JSON.parse(savedLogsRaw);
+                if (!dayLogs || dayLogs.length === 0) {
+                  return (
+                    <div 
+                      className="empty-logs-msg" 
+                      style={{ 
+                        padding: '24px', 
+                        border: '1px dashed var(--border-color)', 
+                        color: 'var(--text-muted)', 
+                        fontFamily: 'var(--font-mono)', 
+                        fontSize: '13px', 
+                        textAlign: 'center',
+                        background: 'rgba(0, 0, 0, 0.2)'
+                      }}
+                    >
+                      NO DATA FOR THIS DATE
+                    </div>
+                  );
+                }
 
-            {/* COLLAPSIBLE MISSION LOGS */}
-            <section className="mission-logs-section">
-              <div 
-                className="panel-title-clickable" 
-                onClick={() => setIsLogsExpanded(!isLogsExpanded)} 
-                style={{ 
-                  cursor: 'pointer', 
-                  display: 'flex', 
-                  justifyContent: 'space-between', 
-                  alignItems: 'center',
-                  userSelect: 'none'
-                }}
-              >
-                <h2 className="panel-title" style={{ margin: 0 }}>📊 MISSION LOGS</h2>
-                <span 
-                  className="collapse-arrow" 
-                  style={{ 
-                    color: 'var(--accent-amber)', 
-                    fontFamily: 'var(--font-mono)', 
-                    fontSize: '13px',
-                    letterSpacing: '0.05em'
-                  }}
-                >
-                  {isLogsExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
-                </span>
-              </div>
-              <hr className="section-divider" />
-              
-              {isLogsExpanded && (
-                <div className="logs-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-                  
-                  {/* Date picker lookup */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>
-                      LOOKUP DATE:
-                    </span>
-                    <input 
-                      type="date" 
-                      className="dark-date-picker" 
-                      value={lookupDate} 
-                      onChange={(e) => setLookupDate(e.target.value)}
-                    />
-                  </div>
+                if (!Array.isArray(dayLogs)) {
+                  return (
+                    <div 
+                      className="empty-logs-msg" 
+                      style={{ 
+                        padding: '24px', 
+                        border: '1px dashed var(--border-color)', 
+                        color: 'var(--text-muted)', 
+                        fontFamily: 'var(--font-mono)', 
+                        fontSize: '13px', 
+                        textAlign: 'center',
+                        background: 'rgba(0, 0, 0, 0.2)'
+                      }}
+                    >
+                      NO DATA FOR THIS DATE
+                    </div>
+                  );
+                }
 
-                  {(() => {
-                    const savedLogsRaw = storage.getItem(`log:${lookupDate}`);
-                    if (!savedLogsRaw) {
-                      return (
-                        <div 
-                          className="empty-logs-msg" 
-                          style={{ 
-                            padding: '24px', 
-                            border: '1px dashed var(--border-color)', 
-                            color: 'var(--text-muted)', 
-                            fontFamily: 'var(--font-mono)', 
-                            fontSize: '13px', 
-                            textAlign: 'center',
-                            background: 'rgba(0, 0, 0, 0.2)'
-                          }}
-                        >
-                          NO DATA FOR THIS DATE
-                        </div>
-                      );
-                    }
+                const completedLogs = dayLogs.filter(l => l && l.type === 'completed');
+                const missedLogs = dayLogs.filter(l => l && l.type === 'missed');
+                const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
+                                missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
 
-                    try {
-                      const dayLogs = JSON.parse(savedLogsRaw);
-                      if (!dayLogs || dayLogs.length === 0) {
+                const storedDebrief = storage.getItem(`debrief:${lookupDate}`);
+
+                return (
+                  <div 
+                    className="day-logs-card" 
+                    style={{ 
+                      background: 'var(--bg-card)', 
+                      border: '1px solid var(--border-color)', 
+                      padding: '16px',
+                      position: 'relative'
+                    }}
+                  >
+                    <div 
+                      className="day-logs-header" 
+                      style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        marginBottom: '12px', 
+                        borderBottom: '1px dashed var(--border-color)', 
+                        paddingBottom: '8px' 
+                      }}
+                    >
+                      <span 
+                        className="day-date" 
+                        style={{ 
+                          fontFamily: 'var(--font-mono)', 
+                          fontSize: '14px', 
+                          color: 'var(--accent-amber)', 
+                          fontWeight: 'bold' 
+                        }}
+                      >
+                        📅 LOG_DATE: {lookupDate}
+                      </span>
+                      <span 
+                        className="day-total-xp" 
+                        style={{ 
+                          fontFamily: 'var(--font-mono)', 
+                          fontSize: '13px', 
+                          color: 'var(--accent-green)', 
+                          fontWeight: 'bold' 
+                        }}
+                      >
+                        +{totalXp} XP EARNED
+                      </span>
+                    </div>
+
+                    <div 
+                      className="day-logs-list" 
+                      style={{ 
+                        display: 'flex', 
+                        flexDirection: 'column', 
+                        gap: '8px',
+                        marginBottom: '16px'
+                      }}
+                    >
+                      {/* Render Completed Tasks */}
+                      {completedLogs.map((log, idx) => {
+                        const logTime = new Date(log.completedAt);
+                        const formattedTime = !isNaN(logTime.getTime()) 
+                          ? `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`
+                          : '--:--';
                         return (
                           <div 
-                            className="empty-logs-msg" 
-                            style={{ 
-                              padding: '24px', 
-                              border: '1px dashed var(--border-color)', 
-                              color: 'var(--text-muted)', 
-                              fontFamily: 'var(--font-mono)', 
-                              fontSize: '13px', 
-                              textAlign: 'center',
-                              background: 'rgba(0, 0, 0, 0.2)'
-                            }}
-                          >
-                            NO DATA FOR THIS DATE
-                          </div>
-                        );
-                      }
-
-                      if (!Array.isArray(dayLogs)) {
-                        return (
-                          <div 
-                            className="empty-logs-msg" 
-                            style={{ 
-                              padding: '24px', 
-                              border: '1px dashed var(--border-color)', 
-                              color: 'var(--text-muted)', 
-                              fontFamily: 'var(--font-mono)', 
-                              fontSize: '13px', 
-                              textAlign: 'center',
-                              background: 'rgba(0, 0, 0, 0.2)'
-                            }}
-                          >
-                            NO DATA FOR THIS DATE
-                          </div>
-                        );
-                      }
-
-                      const completedLogs = dayLogs.filter(l => l && l.type === 'completed');
-                      const missedLogs = dayLogs.filter(l => l && l.type === 'missed');
-                      const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
-                                      missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
-
-                      const storedDebrief = storage.getItem(`debrief:${lookupDate}`);
-
-                      return (
-                        <div 
-                          className="day-logs-card" 
-                          style={{ 
-                            background: 'var(--bg-card)', 
-                            border: '1px solid var(--border-color)', 
-                            padding: '16px',
-                            position: 'relative'
-                          }}
-                        >
-                          <div 
-                            className="day-logs-header" 
+                            key={`comp-${idx}`} 
+                            className="log-entry-row" 
                             style={{ 
                               display: 'flex', 
                               justifyContent: 'space-between', 
                               alignItems: 'center', 
-                              marginBottom: '12px', 
-                              borderBottom: '1px dashed var(--border-color)', 
-                              paddingBottom: '8px' 
+                              padding: '6px 10px', 
+                              background: 'rgba(34, 197, 94, 0.02)', 
+                              border: '1px solid rgba(34, 197, 94, 0.1)',
+                              borderLeft: '3px solid var(--accent-green)'
                             }}
                           >
-                            <span 
-                              className="day-date" 
-                              style={{ 
-                                fontFamily: 'var(--font-mono)', 
-                                fontSize: '14px', 
-                                color: 'var(--accent-amber)', 
-                                fontWeight: 'bold' 
-                              }}
-                            >
-                              📅 LOG_DATE: {lookupDate}
-                            </span>
-                            <span 
-                              className="day-total-xp" 
-                              style={{ 
-                                fontFamily: 'var(--font-mono)', 
-                                fontSize: '13px', 
-                                color: 'var(--accent-green)', 
-                                fontWeight: 'bold' 
-                              }}
-                            >
-                              +{totalXp} XP EARNED
-                            </span>
-                          </div>
-
-                          <div 
-                            className="day-logs-list" 
-                            style={{ 
-                              display: 'flex', 
-                              flexDirection: 'column', 
-                              gap: '8px',
-                              marginBottom: '16px'
-                            }}
-                          >
-                            {/* Render Completed Tasks */}
-                            {completedLogs.map((log, idx) => {
-                              const logTime = new Date(log.completedAt);
-                              const formattedTime = !isNaN(logTime.getTime()) 
-                                ? `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`
-                                : '--:--';
-                              return (
-                                <div 
-                                  key={`comp-${idx}`} 
-                                  className="log-entry-row" 
-                                  style={{ 
-                                    display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center', 
-                                    padding: '6px 10px', 
-                                    background: 'rgba(34, 197, 94, 0.02)', 
-                                    border: '1px solid rgba(34, 197, 94, 0.1)',
-                                    borderLeft: '3px solid var(--accent-green)'
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                                    <span 
-                                      className={`badge badge-${(log.tag || '').toLowerCase()}`} 
-                                      style={{ 
-                                        fontSize: '9px', 
-                                        padding: '1px 5px',
-                                        whiteSpace: 'nowrap'
-                                      }}
-                                    >
-                                      {log.tag}
-                                    </span>
-                                    <span 
-                                      className="log-entry-name" 
-                                      style={{ 
-                                        fontSize: '13px', 
-                                        color: 'var(--accent-green)',
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis'
-                                      }}
-                                    >
-                                      {log.taskName}
-                                    </span>
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                                    <span 
-                                      className="log-entry-xp" 
-                                      style={{ 
-                                        color: 'var(--accent-green)', 
-                                        fontFamily: 'var(--font-mono)', 
-                                        fontSize: '12px', 
-                                        fontWeight: 'bold' 
-                                      }}
-                                    >
-                                      +{log.xp} XP
-                                    </span>
-                                    <span 
-                                      className="log-entry-time" 
-                                      style={{ 
-                                        color: 'var(--text-muted)', 
-                                        fontFamily: 'var(--font-mono)', 
-                                        fontSize: '11px' 
-                                      }}
-                                    >
-                                      [{formattedTime}]
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-
-                            {/* Render Missed Fixed Tasks */}
-                            {missedLogs.map((log, idx) => {
-                              return (
-                                <div 
-                                  key={`missed-${idx}`} 
-                                  className="log-entry-row" 
-                                  style={{ 
-                                    display: 'flex', 
-                                    justifyContent: 'space-between', 
-                                    alignItems: 'center', 
-                                    padding: '6px 10px', 
-                                    background: 'rgba(255, 111, 97, 0.02)', 
-                                    border: '1px solid rgba(255, 111, 97, 0.05)',
-                                    borderLeft: '3px solid var(--accent-coral)',
-                                    opacity: 0.6
-                                  }}
-                                >
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                                    <span 
-                                      className={`badge badge-${(log.tag || '').toLowerCase()}`} 
-                                      style={{ 
-                                        fontSize: '9px', 
-                                        padding: '1px 5px',
-                                        whiteSpace: 'nowrap'
-                                      }}
-                                    >
-                                      {log.tag}
-                                    </span>
-                                    <span 
-                                      className="log-entry-name" 
-                                      style={{ 
-                                        fontSize: '13px', 
-                                        color: log.xpPenalty ? 'var(--accent-coral)' : 'var(--text-muted)',
-                                        whiteSpace: 'nowrap',
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis'
-                                      }}
-                                    >
-                                      {log.taskName}
-                                    </span>
-                                  </div>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                                    <span 
-                                      className="log-entry-xp" 
-                                      style={{ 
-                                        color: 'var(--accent-coral)', 
-                                        fontFamily: 'var(--font-mono)', 
-                                        fontSize: '11px', 
-                                        fontWeight: 'bold' 
-                                      }}
-                                    >
-                                      MISSED {log.xpPenalty ? `(${log.xpPenalty} XP)` : ''}
-                                    </span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {storedDebrief && (
-                            <div className="debrief-collapsible" style={{ marginBottom: '16px' }}>
-                              <button 
-                                onClick={() => setIsDebriefExpanded(!isDebriefExpanded)}
-                                style={{
-                                  background: 'none',
-                                  border: 'none',
-                                  color: 'var(--accent-amber)',
-                                  fontFamily: 'var(--font-mono)',
-                                  fontSize: '12px',
-                                  cursor: 'pointer',
-                                  padding: '4px 0',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  gap: '6px',
-                                  width: '100%',
-                                  textAlign: 'left'
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                              <span 
+                                className={`badge badge-${(log.tag || '').toLowerCase()}`} 
+                                style={{ 
+                                  fontSize: '9px', 
+                                  padding: '1px 5px',
+                                  whiteSpace: 'nowrap'
                                 }}
                               >
-                                <span>{isDebriefExpanded ? '▼' : '►'} COMMANDER'S DEBRIEF</span>
-                              </button>
-                              
-                              {isDebriefExpanded && (
-                                <div style={{
-                                  background: 'rgba(245, 166, 35, 0.02)',
-                                  borderLeft: '2px solid var(--accent-amber)',
-                                  padding: '10px 14px',
-                                  marginTop: '6px',
-                                  fontFamily: 'var(--font-mono)',
-                                  fontSize: '12px',
-                                  color: 'var(--accent-amber)',
-                                  whiteSpace: 'pre-wrap',
-                                  lineHeight: '1.5'
-                                }}>
-                                  {storedDebrief}
-                                </div>
-                              )}
+                                {log.tag}
+                              </span>
+                              <span 
+                                className="log-entry-name" 
+                                style={{ 
+                                  fontSize: '13px', 
+                                  color: 'var(--accent-green)',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}
+                              >
+                                {log.taskName}
+                              </span>
                             </div>
-                          )}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                              <span 
+                                className="log-entry-xp" 
+                                style={{ 
+                                  color: 'var(--accent-green)', 
+                                  fontFamily: 'var(--font-mono)', 
+                                  fontSize: '12px', 
+                                  fontWeight: 'bold' 
+                                }}
+                              >
+                                +{log.xp} XP
+                              </span>
+                              <span 
+                                className="log-entry-time" 
+                                style={{ 
+                                  color: 'var(--text-muted)', 
+                                  fontFamily: 'var(--font-mono)', 
+                                  fontSize: '11px' 
+                                }}
+                              >
+                                [{formattedTime}]
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
 
-                          {/* Stats line */}
+                      {/* Render Missed Fixed Tasks */}
+                      {missedLogs.map((log, idx) => {
+                        return (
                           <div 
+                            key={`missed-${idx}`} 
+                            className="log-entry-row" 
                             style={{ 
-                              fontFamily: 'var(--font-mono)', 
-                              fontSize: '13px', 
-                              color: 'var(--text-muted)',
-                              textAlign: 'right',
-                              borderTop: '1px dashed var(--border-color)',
-                              paddingTop: '8px'
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              padding: '6px 10px', 
+                              background: 'rgba(255, 111, 97, 0.02)', 
+                              border: '1px solid rgba(255, 111, 97, 0.05)',
+                              borderLeft: '3px solid var(--accent-coral)',
+                              opacity: 0.6
                             }}
                           >
-                            STATS: <span style={{ color: 'var(--accent-green)' }}>{completedLogs.length} COMPLETED</span> / <span style={{ color: 'var(--accent-coral)' }}>{missedLogs.length} MISSED</span> / <span style={{ color: 'var(--accent-amber)' }}>{totalXp} XP EARNED</span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                              <span 
+                                className={`badge badge-${(log.tag || '').toLowerCase()}`} 
+                                style={{ 
+                                  fontSize: '9px', 
+                                  padding: '1px 5px',
+                                  whiteSpace: 'nowrap'
+                                }}
+                              >
+                                {log.tag}
+                              </span>
+                              <span 
+                                className="log-entry-name" 
+                                style={{ 
+                                  fontSize: '13px', 
+                                  color: log.xpPenalty ? 'var(--accent-coral)' : 'var(--text-muted)',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis'
+                                }}
+                              >
+                                {log.taskName}
+                              </span>
+                            </div>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+                              <span 
+                                className="log-entry-xp" 
+                                style={{ 
+                                  color: 'var(--accent-coral)', 
+                                  fontFamily: 'var(--font-mono)', 
+                                  fontSize: '11px', 
+                                  fontWeight: 'bold' 
+                                }}
+                              >
+                                MISSED {log.xpPenalty ? `(${log.xpPenalty} XP)` : ''}
+                              </span>
+                            </div>
                           </div>
+                        );
+                      })}
+                    </div>
 
-                        </div>
-                      );
-                    } catch (err) {
-                      console.error("Failed to parse day logs", err);
-                      return (
-                        <div 
-                          className="empty-logs-msg" 
-                          style={{ 
-                            padding: '24px', 
-                            border: '1px dashed var(--border-color)', 
-                            color: 'var(--text-muted)', 
-                            fontFamily: 'var(--font-mono)', 
-                            fontSize: '13px', 
-                            textAlign: 'center',
-                            background: 'rgba(0, 0, 0, 0.2)'
+                    {storedDebrief && (
+                      <div className="debrief-collapsible" style={{ marginBottom: '16px' }}>
+                        <button 
+                          onClick={() => setIsDebriefExpanded(!isDebriefExpanded)}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            color: 'var(--accent-amber)',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '12px',
+                            cursor: 'pointer',
+                            padding: '4px 0',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            width: '100%',
+                            textAlign: 'left'
                           }}
                         >
-                          CORRUPT LOG DATA FOR THIS DATE
-                        </div>
-                      );
-                    }
-                  })()}
+                          <span>{isDebriefExpanded ? '▼' : '►'} COMMANDER'S DEBRIEF</span>
+                        </button>
+                        
+                        {isDebriefExpanded && (
+                          <div style={{
+                            background: 'rgba(245, 166, 35, 0.02)',
+                            borderLeft: '2px solid var(--accent-amber)',
+                            padding: '10px 14px',
+                            marginTop: '6px',
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '12px',
+                            color: 'var(--accent-amber)',
+                            whiteSpace: 'pre-wrap',
+                            lineHeight: '1.5'
+                          }}>
+                            {storedDebrief}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
-                </div>
-              )}
-            </section>
+                    {/* Stats line */}
+                    <div 
+                      style={{ 
+                        fontFamily: 'var(--font-mono)', 
+                        fontSize: '13px', 
+                        color: 'var(--text-muted)',
+                        textAlign: 'right',
+                        borderTop: '1px dashed var(--border-color)',
+                        paddingTop: '8px'
+                      }}
+                    >
+                      STATS: <span style={{ color: 'var(--accent-green)' }}>{completedLogs.length} COMPLETED</span> / <span style={{ color: 'var(--accent-coral)' }}>{missedLogs.length} MISSED</span> / <span style={{ color: 'var(--accent-amber)' }}>{totalXp} XP EARNED</span>
+                    </div>
+
+                  </div>
+                );
+              } catch (err) {
+                console.error("Failed to parse day logs", err);
+                return (
+                  <div 
+                    className="empty-logs-msg" 
+                    style={{ 
+                      padding: '24px', 
+                      border: '1px dashed var(--border-color)', 
+                      color: 'var(--text-muted)', 
+                      fontFamily: 'var(--font-mono)', 
+                      fontSize: '13px', 
+                      textAlign: 'center',
+                      background: 'rgba(0, 0, 0, 0.2)'
+                    }}
+                  >
+                    CORRUPT LOG DATA FOR THIS DATE
+                  </div>
+                );
+              }
+            })()}
+
           </div>
         )}
+      </section>
+    );
+  };
 
-        {activeTab === 'schedule' && (
-          <div className="schedule-container">
-            {SCHEDULE_BLOCKS.map((block, idx) => {
-              const isActive = activeBlockIndex === idx;
+  const renderSkillMap = () => {
+    return (
+      <section className="skill-map-section">
+        <div 
+          className="panel-title-clickable" 
+          onClick={() => setIsSkillMapExpanded(prev => { const next = !prev; storage.setItem('isSkillMapExpanded', String(next)); return next; })} 
+          style={{ 
+            cursor: 'pointer', 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center',
+            userSelect: 'none'
+          }}
+        >
+          <h2 className="panel-title" style={{ margin: 0 }}>🗺️ SKILL MAP</h2>
+          <span 
+            className="collapse-arrow" 
+            style={{ 
+              color: 'var(--accent-amber)', 
+              fontFamily: 'var(--font-mono)', 
+              fontSize: '13px',
+              letterSpacing: '0.05em'
+            }}
+          >
+            {isSkillMapExpanded ? '[ COLLAPSE - ]' : '[ EXPAND + ]'}
+          </span>
+        </div>
+        <hr className="section-divider" />
+
+        {isSkillMapExpanded && (
+          <div className="skill-map-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px', marginBottom: '24px' }}>
+            {['NETWORKING', 'LINUX', 'SOC OPERATIONS', 'WEB SECURITY', 'TOOLS MASTERY', 'ACTIVE DIRECTORY', 'INTERVIEW PREP', 'THM / LABS'].map(domain => {
+              const chain = CHAINS[domain];
+              const completedCount = chainProgress[domain] || 0;
+              const totalSteps = chain.length;
+              const pct = Math.round((completedCount / totalSteps) * 100);
+              
               return (
                 <div 
-                  key={idx} 
-                  className={`timeline-block border-${block.category} ${isActive ? 'active-block' : ''}`}
+                  key={domain} 
+                  className="skill-card" 
+                  style={{ 
+                    background: 'var(--bg-card)', 
+                    border: '1px solid var(--border-color)', 
+                    padding: '16px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '12px'
+                  }}
                 >
-                  <div className="timeline-time">{block.time}</div>
-                  <div className="timeline-details">
-                    <div className="timeline-header-group">
-                      <span className="timeline-name">{block.name}</span>
-                      <span className="timeline-desc">{block.desc}</span>
-                    </div>
-                    <span className="timeline-type-tag">{block.category}</span>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontWeight: 'bold', fontSize: '15px', color: 'var(--accent-amber)', textTransform: 'uppercase' }}>
+                      {domain}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--accent-amber)' }}>
+                      {completedCount} / {totalSteps} ({pct}%)
+                    </span>
+                  </div>
+                  
+                  <div className="xp-bar-outer" style={{ height: '6px' }}>
+                    <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
+                  </div>
+
+                  <div className="skill-steps-list" style={{ display: 'flex', flexDirection: 'column', gap: '4px', maxHeight: '180px', overflowY: 'auto', paddingRight: '4px' }}>
+                    {chain.map((step, idx) => {
+                      const isCleared = idx < completedCount;
+                      return (
+                        <div 
+                          key={idx} 
+                          style={{ 
+                            fontSize: '11px', 
+                            fontFamily: 'var(--font-mono)', 
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            color: isCleared ? 'var(--accent-green)' : 'var(--text-muted)',
+                            textDecoration: isCleared ? 'line-through' : 'none'
+                          }}
+                        >
+                          <span>{isCleared ? '✓' : '○'}</span>
+                          <span style={{ opacity: isCleared ? 0.6 : 1 }}>
+                            {step.title}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               );
             })}
           </div>
         )}
+      </section>
+    );
+  };
 
-        {activeTab === 'character' && (
-          <div className="character-layout">
-            <section className="character-sheet-section">
-              <h2 className="panel-title">Character Sheet</h2>
-              <hr className="section-divider" />
+  const renderCharacterSheet = () => {
+    return (
+      <div className="character-layout">
+        <section className="character-sheet-section">
+          <h2 className="panel-title">Character Sheet</h2>
+          <hr className="section-divider" />
+          
+          <div className="stats-card">
+            <div className="stats-grid">
               
-              <div className="stats-card">
-                <div className="stats-grid">
-                  
-                  {/* SIGINT */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">📡</span>
-                        <span className="stat-name">SIGINT</span>
-                        <span className="stat-desc">— Technical knowledge</span>
-                      </div>
-                      <span className="stat-value">{computedStats.sigint}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.sigint}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
+              {/* SIGINT */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">📡</span>
+                    <span className="stat-name">SIGINT</span>
+                    <span className="stat-desc">— Technical knowledge</span>
                   </div>
-
-                  {/* OPS */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">⚡</span>
-                        <span className="stat-name">OPS</span>
-                        <span className="stat-desc">— Execution speed</span>
-                      </div>
-                      <span className="stat-value">{computedStats.ops}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.ops}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
-                  </div>
-
-                  {/* ARSENAL */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">⚔️</span>
-                        <span className="stat-name">ARSENAL</span>
-                        <span className="stat-desc">— Active projects</span>
-                      </div>
-                      <span className="stat-value">{computedStats.arsenal}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.arsenal}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
-                  </div>
-
-                  {/* COMMS */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">💬</span>
-                        <span className="stat-name">COMMS</span>
-                        <span className="stat-desc">— Interview readiness</span>
-                      </div>
-                      <span className="stat-value">{computedStats.comms}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.comms}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
-                  </div>
-
-                  {/* DISCIPLINE */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">🛡️</span>
-                        <span className="stat-name">DISCIPLINE</span>
-                        <span className="stat-desc">— Schedule adherence</span>
-                      </div>
-                      <span className="stat-value">{computedStats.discipline}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.discipline}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
-                  </div>
-
-                  {/* ENDURANCE */}
-                  <div className="stat-item">
-                    <div className="stat-header">
-                      <div className="stat-label-group">
-                        <span className="stat-icon">🔋</span>
-                        <span className="stat-name">ENDURANCE</span>
-                        <span className="stat-desc">— Physical/mental</span>
-                      </div>
-                      <span className="stat-value">{computedStats.endurance}%</span>
-                    </div>
-                    <div className="stat-bar-outer">
-                      <div className="stat-bar-inner" style={{ width: `${computedStats.endurance}%`, transition: 'width 0.6s ease' }}></div>
-                    </div>
-                  </div>
-
+                  <span className="stat-value">{computedStats.sigint}%</span>
+                </div>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.sigint}%`, transition: 'width 0.6s ease' }}></div>
                 </div>
               </div>
 
-              {/* OPERATOR STAT SUMMARY */}
-              <div className="profile-card">
-                <div className="profile-details">
-                  <span className="profile-name">NAME: YASH</span>
-                  <span className="profile-xp">LIFETIME XP: {profile.totalXp} | CURRENT LEVEL: {profile.level}</span>
+              {/* OPS */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">⚡</span>
+                    <span className="stat-name">OPS</span>
+                    <span className="stat-desc">— Execution speed</span>
+                  </div>
+                  <span className="stat-value">{computedStats.ops}%</span>
                 </div>
-                <div className="profile-streak-badge">
-                  <span>🔥 {profile.streak} DAY STREAK</span>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.ops}%`, transition: 'width 0.6s ease' }}></div>
                 </div>
               </div>
-            </section>
+
+              {/* ARSENAL */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">⚔️</span>
+                    <span className="stat-name">ARSENAL</span>
+                    <span className="stat-desc">— Active projects</span>
+                  </div>
+                  <span className="stat-value">{computedStats.arsenal}%</span>
+                </div>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.arsenal}%`, transition: 'width 0.6s ease' }}></div>
+                </div>
+              </div>
+
+              {/* COMMS */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">💬</span>
+                    <span className="stat-name">COMMS</span>
+                    <span className="stat-desc">— Interview readiness</span>
+                  </div>
+                  <span className="stat-value">{computedStats.comms}%</span>
+                </div>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.comms}%`, transition: 'width 0.6s ease' }}></div>
+                </div>
+              </div>
+
+              {/* DISCIPLINE */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">🛡️</span>
+                    <span className="stat-name">DISCIPLINE</span>
+                    <span className="stat-desc">— Schedule adherence</span>
+                  </div>
+                  <span className="stat-value">{computedStats.discipline}%</span>
+                </div>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.discipline}%`, transition: 'width 0.6s ease' }}></div>
+                </div>
+              </div>
+
+              {/* ENDURANCE */}
+              <div className="stat-item">
+                <div className="stat-header">
+                  <div className="stat-label-group">
+                    <span className="stat-icon">🔋</span>
+                    <span className="stat-name">ENDURANCE</span>
+                    <span className="stat-desc">— Physical/mental</span>
+                  </div>
+                  <span className="stat-value">{computedStats.endurance}%</span>
+                </div>
+                <div className="stat-bar-outer">
+                  <div className="stat-bar-inner" style={{ width: `${computedStats.endurance}%`, transition: 'width 0.6s ease' }}></div>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* OPERATOR STAT SUMMARY */}
+          <div className="profile-card">
+            <div className="profile-details">
+              <span className="profile-name">NAME: YASH</span>
+              <span className="profile-xp">LIFETIME XP: {profile.totalXp} | CURRENT LEVEL: {profile.level}</span>
+            </div>
+            <div className="profile-streak-badge">
+              <span>🔥 {profile.streak} DAY STREAK</span>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+  return (
+    <div className="layout-wrapper">
+      {/* LEFT SIDEBAR NAVIGATION */}
+      <aside className="sidebar">
+        <div className="sidebar-title">TAC-NET</div>
+        <nav className="sidebar-menu">
+          <div 
+            className={`sidebar-link ${activePage === 'home' ? 'active' : ''}`} 
+            onClick={() => setActivePage('home')}
+          >
+            <span>🏠</span> HOME
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'missions' ? 'active' : ''}`} 
+            onClick={() => setActivePage('missions')}
+          >
+            <span>⚔️</span> MISSIONS
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'projects' ? 'active' : ''}`} 
+            onClick={() => setActivePage('projects')}
+          >
+            <span>📁</span> PROJECTS
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'skillmap' ? 'active' : ''}`} 
+            onClick={() => setActivePage('skillmap')}
+          >
+            <span>🗺️</span> SKILL MAP
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'character' ? 'active' : ''}`} 
+            onClick={() => setActivePage('character')}
+          >
+            <span>👤</span> CHARACTER
+          </div>
+          <div 
+            className={`sidebar-link ${activePage === 'logs' ? 'active' : ''}`} 
+            onClick={() => setActivePage('logs')}
+          >
+            <span>📊</span> LOGS
+          </div>
+        </nav>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="main-content">
+        {/* GLOBAL HEADER */}
+        <header className="global-header" style={{ marginBottom: '20px' }}>
+          <div className="header-operator-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="operator-role" style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '13px', fontWeight: 'bold' }}>
+              OPERATOR TERMINAL // DEEP GRID
+            </span>
+            <div className="header-stats-row" style={{ display: 'flex', gap: '12px' }}>
+              <span className="streak-badge" style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--accent-orange)' }}>
+                🔥 STREAK: {profile.streak} {profile.streak === 1 ? 'DAY' : 'DAYS'}
+              </span>
+              <span className="level-badge" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', fontSize: '11px', fontWeight: 'bold', padding: '1px 6px' }}>
+                LVL {levelProgress.level}
+              </span>
+            </div>
+          </div>
+          <div className="xp-progress-container" style={{ marginTop: '8px' }}>
+            <div className="xp-bar-outer" style={{ height: '6px' }}>
+              <div className="xp-bar-inner" style={{ width: `${levelProgress.pct}%`, transition: 'width 0.6s ease' }}></div>
+            </div>
+            <div className="xp-numbers" style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px' }}>
+              {levelProgress.xpInLevel} / 200 XP
+            </div>
+          </div>
+        </header>
+
+        {/* Missed Task Penalty Warning Banner */}
+        {showPenaltyBanner && (() => {
+          const yesterday = getYesterdayString();
+          const yesterdayLogsRaw = storage.getItem(`log:${yesterday}`);
+          let missedPenalizedCount = 0;
+          let totalPenalty = 0;
+          if (yesterdayLogsRaw) {
+            try {
+              const logs = JSON.parse(yesterdayLogsRaw);
+              if (Array.isArray(logs)) {
+                logs.forEach(log => {
+                  if (log.type === 'missed' && log.xpPenalty && log.xpPenalty < 0) {
+                    missedPenalizedCount++;
+                    totalPenalty += Math.abs(log.xpPenalty);
+                  }
+                });
+              }
+            } catch {}
+          }
+
+          if (missedPenalizedCount === 0) return null;
+
+          return (
+            <div className="warning-banner" style={{
+              background: 'rgba(255, 111, 97, 0.05)',
+              border: '1px solid var(--accent-coral)',
+              padding: '12px 16px',
+              marginBottom: '20px',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '13px',
+              color: 'var(--accent-coral)',
+              position: 'relative'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>[!] OPERATIONAL ANOMALY: MISSED {missedPenalizedCount} CRITICAL TASKS YESTERDAY. PENALTY APPLIED: -{totalPenalty} XP.</span>
+                <button 
+                  onClick={() => setShowPenaltyBanner(false)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--accent-coral)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    textDecoration: 'underline'
+                  }}
+                >
+                  [ DISMISS WARNING ]
+                </button>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* Weekly Report Banner */}
+        {weeklyReview && !isWeeklyReviewDismissed && (() => {
+          const isoWeek = getISOWeekString();
+          
+          let borderLeftColor = 'var(--accent-green)';
+          let badgeColor = 'var(--accent-green)';
+          if (weeklyReview.threatLevel === 'AMBER') {
+            borderLeftColor = 'var(--accent-amber)';
+            badgeColor = 'var(--accent-amber)';
+          } else if (weeklyReview.threatLevel === 'RED') {
+            borderLeftColor = 'var(--accent-coral)';
+            badgeColor = 'var(--accent-coral)';
+          }
+  
+          return (
+            <div style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-color)',
+              borderLeft: `5px solid ${borderLeftColor}`,
+              padding: '16px',
+              marginBottom: '20px',
+              fontFamily: 'var(--font-mono)',
+              position: 'relative',
+              boxShadow: '0 0 10px rgba(0, 0, 0, 0.3)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    border: `1px solid ${badgeColor}`,
+                    color: badgeColor,
+                    padding: '2px 6px',
+                    fontSize: '11px',
+                    fontWeight: 'bold'
+                  }}>
+                    THREAT LEVEL: {weeklyReview.threatLevel}
+                  </span>
+                  <span style={{ fontSize: '14px', fontWeight: 'bold', color: 'var(--text-main)', letterSpacing: '0.05em' }}>
+                    {weeklyReview.headline}
+                  </span>
+                </div>
+                <button
+                  onClick={() => {
+                    storage.setItem(`dismissedReview:${isoWeek}`, 'true');
+                    setIsWeeklyReviewDismissed(true);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  [X]
+                </button>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-muted)' }}>
+                <span>&gt; INSIGHT: {weeklyReview.insight}</span>
+                <span>&gt; FOCUS: {weeklyReview.nextWeekFocus}</span>
+                <span>&gt; STRONGEST STAT: <span style={{ color: 'var(--accent-green)' }}>{weeklyReview.strongestStat}</span> | WEAKEST STAT: <span style={{ color: 'var(--accent-coral)' }}>{weeklyReview.weakestStat}</span></span>
+              </div>
+            </div>
+          );
+        })()}
+
+        {/* ACTIVE PAGE CONTENT */}
+        {activePage === 'home' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {renderScheduleBlock()}
+            {renderTodaysBriefing()}
+            {renderPriorityMissions()}
+            {renderMainObjectiveCard()}
+          </div>
+        )}
+
+        {activePage === 'missions' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {renderDailyOps()}
+            {renderSideOps()}
+          </div>
+        )}
+
+        {activePage === 'projects' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {renderProjectOps()}
+            {renderProjectBoard()}
+          </div>
+        )}
+
+        {activePage === 'skillmap' && (
+          <div>
+            {renderSkillMap()}
+          </div>
+        )}
+
+        {activePage === 'character' && (
+          <div>
+            {renderCharacterSheet()}
+          </div>
+        )}
+
+        {activePage === 'logs' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {renderLifeMetrics()}
+            {renderMissionLogs()}
           </div>
         )}
       </main>
