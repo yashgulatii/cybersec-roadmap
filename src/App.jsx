@@ -3881,7 +3881,34 @@ export default function App() {
             <span className="operator-role" style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '13px', fontWeight: 'bold' }}>
               OPERATOR TERMINAL // DEEP GRID
             </span>
-            <div className="header-stats-row" style={{ display: 'flex', gap: '12px' }}>
+            <div className="header-stats-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+              <button 
+                onClick={handleEndShift}
+                className="end-shift-btn"
+                style={{
+                  background: 'var(--bg-terminal)',
+                  border: '1px solid var(--accent-amber)',
+                  color: 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                  transition: 'all 0.2s',
+                  textTransform: 'uppercase'
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = 'var(--accent-amber)';
+                  e.currentTarget.style.color = 'var(--bg-terminal)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = 'var(--bg-terminal)';
+                  e.currentTarget.style.color = 'var(--accent-amber)';
+                }}
+              >
+                {isDayClosed ? '[ VIEW DEBRIEF ]' : '[ END SHIFT ]'}
+              </button>
               <span className="streak-badge" style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', color: 'var(--accent-orange)' }}>
                 🔥 STREAK: {profile.streak} {profile.streak === 1 ? 'DAY' : 'DAYS'}
               </span>
