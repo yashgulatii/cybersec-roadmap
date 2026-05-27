@@ -338,6 +338,7 @@ export default function App() {
 
   // Daily Flavor Rotation (AI-Powered) state
   const [flavors, setFlavors] = useState({});
+  const [isFlavorLoading, setIsFlavorLoading] = useState(false);
 
   // Missed task penalty banner state
   const [showPenaltyBanner, setShowPenaltyBanner] = useState(() => {
@@ -378,32 +379,52 @@ export default function App() {
     if (!isAuthenticated) return;
     const today = getTodayString();
     const stored = storage.getItem(`flavor:${today}`);
+    
+    let hasValidStored = false;
     if (stored) {
       try {
-        setFlavors(JSON.parse(stored));
-        return;
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          setFlavors(parsed);
+          hasValidStored = true;
+        } else {
+          throw new Error("Stored flavor cache is not a valid JSON object");
+        }
       } catch (e) {
         console.error("Failed to parse stored flavors", e);
       }
     }
 
-    const allTasks = [
-      ...FIXED_TASKS.map(t => ({ id: t.id, name: t.title, tag: t.category })),
-      ...Object.keys(CHAINS).flatMap(chainName => 
-        CHAINS[chainName].map((task, stepIdx) => ({
-          id: `chain:${chainName}:${stepIdx}`,
-          name: task.title,
-          tag: task.category
-        }))
-      )
-    ];
+    if (!hasValidStored) {
+      setIsFlavorLoading(true);
+      const allTasks = [
+        ...FIXED_TASKS.map(t => ({ id: t.id, name: t.title, tag: t.category })),
+        ...Object.keys(CHAINS).flatMap(chainName => 
+          CHAINS[chainName].map((task, stepIdx) => ({
+            id: `chain:${chainName}:${stepIdx}`,
+            name: task.title,
+            tag: task.category
+          }))
+        )
+      ];
 
-    fetchFlavorRotation(allTasks).then(result => {
-      if (result !== null) {
-        storage.setItem(`flavor:${today}`, JSON.stringify(result));
-        setFlavors(result);
-      }
-    });
+      fetchFlavorRotation(allTasks)
+        .then(result => {
+          if (result && typeof result === 'object' && !Array.isArray(result)) {
+            storage.setItem(`flavor:${today}`, JSON.stringify(result));
+            setFlavors(result);
+          } else {
+            throw new Error("Invalid or empty flavor rotation response structure from worker");
+          }
+        })
+        .catch(err => {
+          console.error("Flavor rotation fetch failed:", err);
+          setFlavors({});
+        })
+        .finally(() => {
+          setIsFlavorLoading(false);
+        });
+    }
   }, [isAuthenticated]);
 
   // Push telemetry packages to Serverless KV Store
@@ -509,9 +530,22 @@ export default function App() {
             'Interview Prep': 0,
             'AD Attack & Detection Lab': 0
           };
-          if (remoteData.chainProgress) {
-            resolvedChainProgress = { ...resolvedChainProgress, ...remoteData.chainProgress };
+          
+          let localChainProgress = {};
+          const localSaved = storage.getItem('chainProgress');
+          if (localSaved) {
+            try {
+              localChainProgress = JSON.parse(localSaved);
+            } catch (e) {
+              console.error("Failed to parse local chainProgress", e);
+            }
           }
+
+          Object.keys(resolvedChainProgress).forEach(key => {
+            const remoteVal = (remoteData.chainProgress && remoteData.chainProgress[key] !== undefined) ? remoteData.chainProgress[key] : 0;
+            const localVal = localChainProgress[key] !== undefined ? localChainProgress[key] : 0;
+            resolvedChainProgress[key] = Math.max(localVal, remoteVal);
+          });
           
           // Restore completion times
           let resolvedCompletionTimes = {};
@@ -1036,29 +1070,15 @@ export default function App() {
   // Determine active & visible chain task steps dynamically based on starting perm steps
   const getVisibleChainSteps = (chainName) => {
     const chain = CHAINS[chainName];
-    const startP = chainProgress[chainName] || 0;
-    const visible = [];
+    const currentIdx = chainProgress[chainName] !== undefined ? chainProgress[chainName] : 0;
+    if (currentIdx >= chain.length) return [];
     
-    let currentIdx = startP;
-    while (true) {
-      if (currentIdx >= chain.length) break;
-      const stepId = `chain:${chainName}:${currentIdx}`;
-      const isCompleted = dailyState.completedTaskIds.includes(stepId);
-      
-      visible.push({
-        id: stepId,
-        stepIdx: currentIdx,
-        task: chain[currentIdx]
-      });
-      
-      // Render next step if this one is completed
-      if (isCompleted) {
-        currentIdx = currentIdx + 1; // NO % chain.length!
-      } else {
-        break;
-      }
-    }
-    return visible;
+    const stepId = `chain:${chainName}:${currentIdx}`;
+    return [{
+      id: stepId,
+      stepIdx: currentIdx,
+      task: chain[currentIdx]
+    }];
   };
 
   const DAILY_OPS_FIXED_TASKS = useMemo(() => {
@@ -1152,6 +1172,11 @@ export default function App() {
             <span style={{ fontSize: '11px', color: syncLoading ? '#f5a623' : '#22c55e', marginLeft: '10px', fontWeight: 'normal', fontFamily: 'var(--font-mono)', textTransform: 'uppercase' }}>
               {syncLoading ? '[SYNCING...]' : '[ONLINE]'}
             </span>
+            {isFlavorLoading && (
+              <span style={{ fontSize: '11px', color: 'var(--accent-amber)', marginLeft: '15px', fontWeight: 'bold', fontFamily: 'var(--font-mono)' }}>
+                [ LOADING MISSION BRIEFING... ]
+              </span>
+            )}
           </div>
           <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
             <button 
