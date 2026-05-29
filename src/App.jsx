@@ -629,17 +629,20 @@ export default function App() {
     storage.setItem('customFixedTasks', JSON.stringify(newCustom));
     storage.setItem('deletedTaskIds', JSON.stringify(nextDeleted));
     setFixedTasks(getDynamicFixedTasks());
+    syncWithServer();
   };
 
   const saveCustomChains = (updatedChains) => {
     setChains(updatedChains);
     storage.setItem('customChains', JSON.stringify(updatedChains));
+    syncWithServer();
   };
 
   const saveCustomSchedule = (updatedSchedule) => {
     const sorted = [...updatedSchedule].sort((a, b) => a.start.localeCompare(b.start));
     setSchedule(sorted);
     storage.setItem('customSchedule', JSON.stringify(sorted));
+    syncWithServer();
   };
 
   // Holiday states
@@ -1614,6 +1617,7 @@ export default function App() {
     const debriefsToSync = {};
     const dayClosedToSync = {};
     const flavorsToSync = {};
+    const holidaysToSync = {};
 
     allKeys.forEach(k => {
       if (k) {
@@ -1625,12 +1629,20 @@ export default function App() {
           dayClosedToSync[k] = storage.getItem(k);
         } else if (k.startsWith('flavor:')) {
           flavorsToSync[k] = storage.getItem(k);
+        } else if (k.startsWith('holiday:')) {
+          holidaysToSync[k] = storage.getItem(k);
         }
       }
     });
 
     const statusToSync = storage.getItem('projectStatus') ? JSON.parse(storage.getItem('projectStatus')) : {};
     const progressToSync = storage.getItem('projectProgress') ? JSON.parse(storage.getItem('projectProgress')) : {};
+
+    const customFixedTasksToSync = storage.getItem('customFixedTasks') ? JSON.parse(storage.getItem('customFixedTasks')) : [];
+    const deletedTaskIdsToSync = storage.getItem('deletedTaskIds') ? JSON.parse(storage.getItem('deletedTaskIds')) : [];
+    const customChainsToSync = storage.getItem('customChains') ? JSON.parse(storage.getItem('customChains')) : {};
+    const customScheduleToSync = storage.getItem('customSchedule') ? JSON.parse(storage.getItem('customSchedule')) : [];
+    const eventsToSync = storage.getItem('events') ? JSON.parse(storage.getItem('events')) : [];
 
     fetch('/api/progress', {
       method: 'POST',
@@ -1647,7 +1659,13 @@ export default function App() {
           dayClosed: dayClosedToSync,
           flavors: flavorsToSync,
           projectStatus: statusToSync,
-          projectProgress: progressToSync
+          projectProgress: progressToSync,
+          customFixedTasks: customFixedTasksToSync,
+          deletedTaskIds: deletedTaskIdsToSync,
+          customChains: customChainsToSync,
+          customSchedule: customScheduleToSync,
+          events: eventsToSync,
+          holidays: holidaysToSync
         }
       })
     })
@@ -1661,6 +1679,15 @@ export default function App() {
       .finally(() => {
         setSyncLoading(false);
       });
+  };
+
+  const syncWithServer = (updatedProfile = profile, updatedState = dailyState, updatedChainProgress = chainProgress) => {
+    const activePasscode = passcode || storage.getItem('operator_passcode');
+    if (activePasscode) {
+      const today = getTodayString();
+      const timesToday = storage.getItem(`completion_times:${today}`) ? JSON.parse(storage.getItem(`completion_times:${today}`)) : {};
+      saveProgressToServer(activePasscode, updatedState, updatedProfile, updatedChainProgress, timesToday);
+    }
   };
 
   // Pull Telemetry progress package from Serverless KV Store
@@ -1812,6 +1839,74 @@ export default function App() {
             Object.keys(remoteData.flavors).forEach(k => {
               storage.setItem(k, remoteData.flavors[k]);
             });
+          }
+
+          // Restore holidays
+          if (remoteData.holidays) {
+            Object.keys(remoteData.holidays).forEach(k => {
+              if (k.startsWith('holiday:')) {
+                storage.setItem(k, remoteData.holidays[k]);
+              }
+            });
+            const todayStr = getTodayString();
+            if (remoteData.holidays[`holiday:${todayStr}`]) {
+              setIsTodayHoliday(true);
+            } else {
+              setIsTodayHoliday(false);
+            }
+          } else {
+            setIsTodayHoliday(storage.getItem(`holiday:${getTodayString()}`) !== null);
+          }
+
+          // Restore customFixedTasks
+          let resolvedCustomFixedTasks = [];
+          if (Array.isArray(remoteData.customFixedTasks)) {
+            resolvedCustomFixedTasks = remoteData.customFixedTasks;
+            setCustomFixedTasks(resolvedCustomFixedTasks);
+            storage.setItem('customFixedTasks', JSON.stringify(resolvedCustomFixedTasks));
+          }
+
+          // Restore deletedTaskIds
+          let resolvedDeletedTaskIds = [];
+          if (Array.isArray(remoteData.deletedTaskIds)) {
+            resolvedDeletedTaskIds = remoteData.deletedTaskIds;
+            setDeletedTaskIds(resolvedDeletedTaskIds);
+            storage.setItem('deletedTaskIds', JSON.stringify(resolvedDeletedTaskIds));
+          }
+
+          // Force update fixedTasks list state
+          if (Array.isArray(remoteData.customFixedTasks) || Array.isArray(remoteData.deletedTaskIds)) {
+            const defaultTasks = FIXED_TASKS.filter(t => t.id !== 'fixed:update_linkedin');
+            const merged = [...defaultTasks];
+            resolvedCustomFixedTasks.forEach(c => {
+              const idx = merged.findIndex(t => t.id === c.id);
+              if (idx !== -1) {
+                merged[idx] = c;
+              } else {
+                merged.push(c);
+              }
+            });
+            setFixedTasks(merged.filter(t => !resolvedDeletedTaskIds.includes(t.id)));
+          }
+
+          // Restore customChains
+          if (remoteData.customChains && typeof remoteData.customChains === 'object') {
+            const defaultChains = { ...CHAINS };
+            setChains({ ...defaultChains, ...remoteData.customChains });
+            storage.setItem('customChains', JSON.stringify(remoteData.customChains));
+          }
+
+          // Restore customSchedule
+          if (Array.isArray(remoteData.customSchedule)) {
+            const sorted = [...remoteData.customSchedule].sort((a, b) => a.start.localeCompare(b.start));
+            setSchedule(sorted.length > 0 ? sorted : SCHEDULE);
+            storage.setItem('customSchedule', JSON.stringify(remoteData.customSchedule));
+          }
+
+          // Restore events
+          if (Array.isArray(remoteData.events)) {
+            setEvents(remoteData.events);
+            storage.setItem('events', JSON.stringify(remoteData.events));
           }
 
           // Restore projectStatus
@@ -4788,6 +4883,7 @@ export default function App() {
     setEvents(updatedEvents);
     storage.setItem('events', JSON.stringify(updatedEvents));
     setShowEventModal(false);
+    syncWithServer();
   };
 
   const handleDeleteEvent = () => {
@@ -4796,6 +4892,7 @@ export default function App() {
     setEvents(updatedEvents);
     storage.setItem('events', JSON.stringify(updatedEvents));
     setShowEventModal(false);
+    syncWithServer();
   };
 
   const upcomingEvents = useMemo(() => {
@@ -5498,6 +5595,7 @@ export default function App() {
                   const todayStr = getTodayString();
                   storage.removeItem(`holiday:${todayStr}`);
                   setIsTodayHoliday(false);
+                  syncWithServer();
                 }}
                 className="end-shift-btn"
                 style={{
@@ -6063,6 +6161,7 @@ export default function App() {
                       setIsTodayHoliday(true);
                     }
                     setShowHolidayModal(false);
+                    syncWithServer();
                   }
                 }}
                 style={{
