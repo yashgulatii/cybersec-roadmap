@@ -2,7 +2,116 @@ import { useState, useEffect, useMemo } from 'react';
 import './index.css';
 import { fetchFlavorRotation, fetchDailyDebrief, fetchWeeklyReview } from './services/aiService';
 
-const storage = typeof window !== 'undefined' && window.storage ? window.storage : localStorage;
+const getSafeStorage = () => {
+  const hasWindow = typeof window !== 'undefined';
+  const memoryStorage = {};
+
+  return {
+    getItem(key) {
+      try {
+        if (hasWindow && window.storage && typeof window.storage.getItem === 'function') {
+          return window.storage.getItem(key);
+        }
+        if (hasWindow && window.storage && typeof window.storage.get === 'function') {
+          const val = window.storage.get(key);
+          if (val instanceof Promise) {
+            return memoryStorage[key] !== undefined ? memoryStorage[key] : null;
+          }
+          if (val && typeof val === 'object' && val.value !== undefined) {
+            return val.value;
+          }
+          return typeof val === 'string' ? val : null;
+        }
+      } catch (e) {
+        console.warn("window.storage.getItem/get failed for key:", key, e);
+      }
+
+      try {
+        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
+          return localStorage.getItem(key);
+        }
+      } catch (e) {
+        console.warn("localStorage.getItem failed for key:", key, e);
+      }
+
+      return memoryStorage[key] !== undefined ? memoryStorage[key] : null;
+    },
+    setItem(key, value) {
+      try {
+        memoryStorage[key] = value;
+      } catch (e) { }
+
+      try {
+        if (hasWindow && window.storage && typeof window.storage.setItem === 'function') {
+          window.storage.setItem(key, value);
+          return;
+        }
+        if (hasWindow && window.storage && typeof window.storage.set === 'function') {
+          window.storage.set(key, value);
+          return;
+        }
+      } catch (e) {
+        console.warn("window.storage.setItem/set failed for key:", key, e);
+      }
+
+      try {
+        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
+          localStorage.setItem(key, value);
+        }
+      } catch (e) {
+        console.warn("localStorage.setItem failed for key:", key, e);
+      }
+    },
+    removeItem(key) {
+      try {
+        delete memoryStorage[key];
+      } catch (e) { }
+
+      try {
+        if (hasWindow && window.storage && typeof window.storage.removeItem === 'function') {
+          window.storage.removeItem(key);
+          return;
+        }
+        if (hasWindow && window.storage && typeof window.storage.delete === 'function') {
+          window.storage.delete(key);
+          return;
+        }
+      } catch (e) {
+        console.warn("window.storage.removeItem/delete failed for key:", key, e);
+      }
+
+      try {
+        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
+          localStorage.removeItem(key);
+        }
+      } catch (e) {
+        console.warn("localStorage.removeItem failed for key:", key, e);
+      }
+    },
+    key(index) {
+      try {
+        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
+          return localStorage.key(index);
+        }
+      } catch (e) {
+        console.warn("localStorage.key lookup failed at index:", index, e);
+      }
+      return Object.keys(memoryStorage)[index] || null;
+    },
+    get length() {
+      try {
+        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
+          return localStorage.length;
+        }
+      } catch (e) {
+        console.warn("localStorage.length check failed:", e);
+      }
+      return Object.keys(memoryStorage).length;
+    }
+  };
+};
+
+const storage = getSafeStorage();
 
 let particleCounter = 0;
 
@@ -16,7 +125,6 @@ const FIXED_TASKS = [
   { id: 'fixed:cold_email', title: 'Cold email outreach (2 companies)', category: 'OPS', xp: 50, stat: 'OPS', bonus: 5 },
   { id: 'fixed:record_interview', title: 'Record yourself answering 1 interview Q', category: 'COMMS', xp: 40, stat: 'COMMS', bonus: 4 },
   { id: 'fixed:review_star', title: 'Review 1 STAR answer and refine it', category: 'COMMS', xp: 35, stat: 'COMMS', bonus: 3 },
-  { id: 'fixed:update_linkedin', title: 'Update LinkedIn or resume if needed', category: 'OPS', xp: 25, stat: 'OPS', bonus: 2 },
   { id: 'fixed:read_article', title: 'Read 1 article: threat intel / AppSec / SOC', category: 'INTEL', xp: 30, stat: 'SIGINT', bonus: 3 },
   { id: 'fixed:drink_water', title: 'Drink 3L water', category: 'PHYSICAL', xp: 15, stat: 'ENDURANCE', bonus: 2 },
   { id: 'fixed:sleep_early', title: 'Sleep before 1AM', category: 'DISCIPLINE', xp: 20, stat: 'DISCIPLINE', bonus: 2 }
@@ -264,7 +372,16 @@ const mapDomainKey = (domain) => {
 const initializeTelemetry = () => {
   const today = getTodayString();
   const lastActiveDate = storage.getItem('operator_completion_date');
-  
+
+  let localChains = { ...CHAINS };
+  try {
+    const storedCustom = storage.getItem('customChains');
+    if (storedCustom) {
+      const custom = JSON.parse(storedCustom) || {};
+      localChains = { ...localChains, ...custom };
+    }
+  } catch { }
+
   let chainProgress = {
     'NETWORKING': 0,
     'LINUX': 0,
@@ -275,7 +392,7 @@ const initializeTelemetry = () => {
     'INTERVIEW PREP': 0,
     'THM / LABS': 0
   };
-  
+
   const savedChainProg = storage.getItem('chainProgress');
   if (savedChainProg) {
     try {
@@ -318,8 +435,8 @@ const initializeTelemetry = () => {
           if (parsed && Array.isArray(parsed)) {
             parsed.forEach(entry => {
               if (entry.type === 'completed' && entry.taskName) {
-                Object.keys(CHAINS).forEach(chainName => {
-                  const stepIdx = CHAINS[chainName].findIndex(step => step.title === entry.taskName);
+                Object.keys(localChains).forEach(chainName => {
+                  const stepIdx = localChains[chainName].findIndex(step => step.title === entry.taskName);
                   if (stepIdx !== -1) {
                     chainProgress[chainName] = Math.max(chainProgress[chainName], stepIdx + 1);
                   }
@@ -357,18 +474,82 @@ const initializeTelemetry = () => {
   return { dailyState, chainProgress };
 };
 
+const SCHEDULE = [
+  { id: 's1', label: 'WAKE + RITUAL', start: '05:30', end: '06:30', type: 'DISCIPLINE', description: 'Bath · Surya · no screen' },
+  { id: 's2', label: 'MORNING BRIEF', start: '06:30', end: '06:45', type: 'DISCIPLINE', description: 'Review missions · 15 min' },
+  { id: 's3', label: 'DEEP OPS', start: '06:45', end: '09:30', type: 'ROADMAP', description: 'Roadmap theory · TryHackMe · 2h45m' },
+  { id: 's4', label: 'FIELD BREAK', start: '09:30', end: '10:00', type: 'PHYSICAL', description: 'Tea · stretch · away from screen' },
+  { id: 's5', label: 'PROJECT BUILD', start: '10:00', end: '12:30', type: 'BUILD', description: 'AD Lab · Threat Intel Engine · Cloud Scanner · 2h30m' },
+  { id: 's6', label: 'CHOW', start: '12:30', end: '13:00', type: 'PHYSICAL', description: 'Lunch' },
+  { id: 's7', label: 'REST PHASE', start: '13:00', end: '13:30', type: 'PHYSICAL', description: 'Power nap · 30 min' },
+  { id: 's8', label: 'PHYSICAL TRAINING', start: '13:30', end: '14:15', type: 'PHYSICAL', description: 'Exercise · 40 min' },
+  { id: 's9', label: 'APPLICATION OPS', start: '14:15', end: '16:00', type: 'OPS', description: 'Job apps · cold emails · 1h45m' },
+  { id: 's10', label: 'SECONDARY OPS', start: '16:00', end: '18:00', type: 'LABS', description: 'PortSwigger · Splunk · bug bounty · 2h' },
+  { id: 's11', label: 'PATROL', start: '18:00', end: '20:00', type: 'SOCIAL', description: 'Walk with friend · 1-2 hours' },
+  { id: 's12', label: 'INTEL REVIEW', start: '20:00', end: '21:00', type: 'INTEL', description: 'Read · tech content · 1 hour' },
+  { id: 's13', label: 'AFTER ACTION', start: '21:00', end: '21:30', type: 'DISCIPLINE', description: 'Journal · plan tomorrow · 30 min' },
+  { id: 's14', label: 'COMMS BLACKOUT', start: '21:30', end: '22:30', type: 'DISCIPLINE', description: 'No screens until sleep' },
+  { id: 's15', label: 'STAND DOWN', start: '22:30', end: '5:30', type: 'DISCIPLINE', description: 'Sleep' },
+];
+
+function getCurrentBlock(schedule) {
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  for (const block of schedule) {
+    const [startH, startM] = block.start.split(':').map(Number);
+    const [endH, endM] = block.end.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    const endMinutes = endH * 60 + endM;
+
+    if (currentMinutes >= startMinutes && currentMinutes < endMinutes) {
+      return { current: block, progress: (currentMinutes - startMinutes) / (endMinutes - startMinutes) };
+    }
+  }
+  return null;
+}
+
+function getNextBlock(schedule) {
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
+  for (const block of schedule) {
+    const [startH, startM] = block.start.split(':').map(Number);
+    const startMinutes = startH * 60 + startM;
+    if (startMinutes > currentMinutes) return block;
+  }
+  return null;
+}
+
+const getDynamicFixedTasks = () => {
+  const defaultTasks = FIXED_TASKS.filter(t => t.id !== 'fixed:update_linkedin');
+  try {
+    const storedCustom = storage.getItem('customFixedTasks');
+    const custom = storedCustom ? JSON.parse(storedCustom) || [] : [];
+    const storedDeleted = storage.getItem('deletedTaskIds');
+    const deleted = storedDeleted ? JSON.parse(storedDeleted) || [] : [];
+
+    const merged = [...defaultTasks];
+    custom.forEach(c => {
+      const idx = merged.findIndex(t => t.id === c.id);
+      if (idx !== -1) {
+        merged[idx] = c;
+      } else {
+        merged.push(c);
+      }
+    });
+    return merged.filter(t => !deleted.includes(t.id));
+  } catch {
+    return defaultTasks;
+  }
+};
+
 export default function App() {
   const [activePage, setActivePage] = useState('home');
-  const [tick, setTick] = useState(0);
+  const [currentBlock, setCurrentBlock] = useState(null);
+  const [nextBlock, setNextBlock] = useState(null);
+  const [blockProgress, setBlockProgress] = useState(0);
 
-  // Dynamic schedule updater: tick every 60 seconds
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setTick(prev => prev + 1);
-    }, 60000);
-    return () => clearInterval(timer);
-  }, []);
-  
   // Auth states
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [passcode, setPasscode] = useState('');
@@ -381,6 +562,111 @@ export default function App() {
     return !!savedPasscode;
   });
   const [syncLoading, setSyncLoading] = useState(false);
+
+  // Manage Page states
+  const [manageTab, setManageTab] = useState('fixed');
+  const [newFixedTitle, setNewFixedTitle] = useState('');
+  const [newFixedCategory, setNewFixedCategory] = useState('OPS');
+  const [newFixedXp, setNewFixedXp] = useState(25);
+  const [newFixedStat, setNewFixedStat] = useState('OPS');
+  const [selectedManageChain, setSelectedManageChain] = useState('NETWORKING');
+  const [newChainName, setNewChainName] = useState('');
+  const [newSchedStart, setNewSchedStart] = useState('09:00');
+  const [newSchedEnd, setNewSchedEnd] = useState('10:00');
+  const [newSchedLabel, setNewSchedLabel] = useState('');
+  const [newSchedType, setNewSchedType] = useState('ROADMAP');
+  const [newSchedDesc, setNewSchedDesc] = useState('');
+
+  // Custom task and schedule override states
+  const [deletedTaskIds, setDeletedTaskIds] = useState(() => {
+    try {
+      const stored = storage.getItem('deletedTaskIds');
+      return stored ? JSON.parse(stored) || [] : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [customFixedTasks, setCustomFixedTasks] = useState(() => {
+    try {
+      const stored = storage.getItem('customFixedTasks');
+      return stored ? JSON.parse(stored) || [] : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [fixedTasks, setFixedTasks] = useState(() => {
+    return getDynamicFixedTasks();
+  });
+
+  const [chains, setChains] = useState(() => {
+    const defaultChains = { ...CHAINS };
+    try {
+      const storedCustom = storage.getItem('customChains');
+      if (storedCustom) {
+        const custom = JSON.parse(storedCustom) || {};
+        return { ...defaultChains, ...custom };
+      }
+    } catch { }
+    return defaultChains;
+  });
+
+  const [schedule, setSchedule] = useState(() => {
+    try {
+      const storedCustom = storage.getItem('customSchedule');
+      if (storedCustom) {
+        const parsed = JSON.parse(storedCustom);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return SCHEDULE;
+  });
+
+  const updateFixedTasksList = (newCustom, nextDeleted) => {
+    setCustomFixedTasks(newCustom);
+    setDeletedTaskIds(nextDeleted);
+    storage.setItem('customFixedTasks', JSON.stringify(newCustom));
+    storage.setItem('deletedTaskIds', JSON.stringify(nextDeleted));
+    setFixedTasks(getDynamicFixedTasks());
+  };
+
+  const saveCustomChains = (updatedChains) => {
+    setChains(updatedChains);
+    storage.setItem('customChains', JSON.stringify(updatedChains));
+  };
+
+  const saveCustomSchedule = (updatedSchedule) => {
+    const sorted = [...updatedSchedule].sort((a, b) => a.start.localeCompare(b.start));
+    setSchedule(sorted);
+    storage.setItem('customSchedule', JSON.stringify(sorted));
+  };
+
+  // Holiday states
+  const [showHolidayModal, setShowHolidayModal] = useState(false);
+  const [holidayDate, setHolidayDate] = useState(getTodayString());
+  const [holidayReason, setHolidayReason] = useState('');
+  const [isTodayHoliday, setIsTodayHoliday] = useState(() => {
+    return storage.getItem(`holiday:${getTodayString()}`) !== null;
+  });
+
+  // Calendar and Event System states
+  const [calendarDate, setCalendarDate] = useState(() => new Date());
+  const [showEventModal, setShowEventModal] = useState(false);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [eventName, setEventName] = useState('');
+  const [eventStartDate, setEventStartDate] = useState(getTodayString());
+  const [eventEndDate, setEventEndDate] = useState(getTodayString());
+  const [eventMissionsActive, setEventMissionsActive] = useState(true);
+  const [eventColor, setEventColor] = useState('amber');
+  const [events, setEvents] = useState(() => {
+    try {
+      const saved = storage.getItem('events');
+      return saved ? JSON.parse(saved) || [] : [];
+    } catch {
+      return [];
+    }
+  });
 
   // Profile state - load profile and correct streak synchronously on initialisation
   const [profile, setProfile] = useState(() => {
@@ -425,7 +711,7 @@ export default function App() {
 
   // Today's daily state
   const [dailyState, setDailyState] = useState(telemetry.dailyState);
-  
+
   // Permanent chain step progress
   const [chainProgress, setChainProgress] = useState(telemetry.chainProgress);
 
@@ -436,7 +722,7 @@ export default function App() {
       try {
         const parsed = JSON.parse(saved);
         if (parsed && typeof parsed === 'object') return parsed;
-      } catch {}
+      } catch { }
     }
     return { 'ad-lab': 'ACTIVE', 'threat-intel': 'QUEUED', 'cloud-scanner': 'QUEUED' };
   });
@@ -454,7 +740,7 @@ export default function App() {
             'cloud-scanner': typeof parsed['cloud-scanner'] === 'number' ? parsed['cloud-scanner'] : 0
           };
         }
-      } catch {}
+      } catch { }
     }
     return { 'ad-lab': 3, 'threat-intel': 0, 'cloud-scanner': 0 };
   });
@@ -504,10 +790,10 @@ export default function App() {
     const activeProjProg = projectProgress[activeProject.id] || 0;
     const activeProjCompletedToday = projectCompletedTasks[activeProject.id] || [];
     const opsTasks = [];
-    
+
     // Calculate starting index of tasks completed today
     const startIndex = Math.max(0, activeProjProg - activeProjCompletedToday.length);
-    
+
     // Add completed today tasks
     for (let i = startIndex; i < activeProjProg; i++) {
       if (activeProject.tasks[i]) {
@@ -517,7 +803,7 @@ export default function App() {
         });
       }
     }
-    
+
     // Add single active task if not fully complete
     if (activeProjProg < activeProject.tasks.length) {
       opsTasks.push({
@@ -525,17 +811,34 @@ export default function App() {
         completed: false
       });
     }
-    
+
     return opsTasks;
   }, [activeProject, projectProgress, projectCompletedTasks]);
 
   // Compute RPG stats dynamically based on daily completedTaskIds and last 7 days of logs
   const computedStats = useMemo(() => {
     const today = getTodayString();
-    
-    // Count completions of FIXED_TASKS in last 7 days:
+
+    // Calculate active days in last 7 days (non-holiday, non-suspended)
+    let activeDays7 = 0;
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+      const isHoliday = storage.getItem(`holiday:${dateStr}`) !== null;
+      const isSuspended = events.some(evt =>
+        evt.missionsActive === false && dateStr >= evt.startDate && dateStr <= evt.endDate
+      );
+      if (!isHoliday && !isSuspended) {
+        activeDays7++;
+      }
+    }
+    if (activeDays7 === 0) activeDays7 = 1;
+
+    // Count completions of fixedTasks in last 7 days:
     const counts7Days = {};
-    FIXED_TASKS.forEach(t => {
+    fixedTasks.forEach(t => {
       counts7Days[t.id] = 0;
     });
 
@@ -543,7 +846,7 @@ export default function App() {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      
+
       if (dateStr === today) {
         dailyState.completedTaskIds.forEach(id => {
           if (id.startsWith('fixed:')) {
@@ -558,14 +861,14 @@ export default function App() {
             if (Array.isArray(logs)) {
               logs.forEach(log => {
                 if (log.type === 'completed') {
-                  const fixedTask = FIXED_TASKS.find(t => t.title === log.taskName);
+                  const fixedTask = fixedTasks.find(t => t.title === log.taskName);
                   if (fixedTask) {
                     counts7Days[fixedTask.id] = (counts7Days[fixedTask.id] || 0) + 1;
                   }
                 }
               });
             }
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -574,15 +877,15 @@ export default function App() {
     // = (total ROADMAP + LABS chain steps permanently completed across all chains) / (total ROADMAP + LABS chain steps defined) × 100
     let totalRoadmapLabsDefined = 0;
     let totalRoadmapLabsCompleted = 0;
-    Object.keys(CHAINS).forEach(chainName => {
-      CHAINS[chainName].forEach(step => {
+    Object.keys(chains).forEach(chainName => {
+      chains[chainName].forEach(step => {
         if (step.category === 'ROADMAP' || step.category === 'LABS') {
           totalRoadmapLabsDefined++;
         }
       });
       const completedCount = chainProgress[chainName] || 0;
       for (let i = 0; i < completedCount; i++) {
-        const step = CHAINS[chainName][i];
+        const step = chains[chainName][i];
         if (step && (step.category === 'ROADMAP' || step.category === 'LABS')) {
           totalRoadmapLabsCompleted++;
         }
@@ -591,10 +894,10 @@ export default function App() {
     const sigint = totalRoadmapLabsDefined > 0 ? Math.min(100, Math.round((totalRoadmapLabsCompleted / totalRoadmapLabsDefined) * 100)) : 0;
 
     // 2. OPS — Execution speed
-    // = (OPS-tagged fixed tasks completed in last 7 days) / (OPS-tagged fixed tasks × 7) × 100
-    const opsTasks = FIXED_TASKS.filter(t => t.category === 'OPS');
+    // = (OPS-tagged fixed tasks completed in last 7 days) / (OPS-tagged fixed tasks × activeDays7) × 100
+    const opsTasks = fixedTasks.filter(t => t.category === 'OPS');
     const opsCompleted = opsTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
-    const ops = opsTasks.length > 0 ? Math.min(100, Math.round((opsCompleted / (opsTasks.length * 7)) * 100)) : 0;
+    const ops = opsTasks.length > 0 ? Math.min(100, Math.round((opsCompleted / (opsTasks.length * activeDays7)) * 100)) : 0;
 
     // 3. ARSENAL — Active projects
     // = (sum of projectProgress[id] across all projects) / (sum of total tasks across all projects) × 100
@@ -607,40 +910,40 @@ export default function App() {
     const arsenal = totalProjectTasks > 0 ? Math.min(100, Math.round((totalProjectProgress / totalProjectTasks) * 100)) : 0;
 
     // 4. COMMS — Interview readiness
-    // = (COMMS chain steps completed + COMMS fixed tasks completed last 7 days) / (total COMMS steps + COMMS fixed tasks × 7) × 100
+    // = (COMMS chain steps completed + COMMS fixed tasks completed last 7 days) / (total COMMS steps + COMMS fixed tasks × activeDays7) × 100
     let totalCommsStepsDefined = 0;
     let totalCommsStepsCompleted = 0;
-    Object.keys(CHAINS).forEach(chainName => {
-      CHAINS[chainName].forEach(step => {
+    Object.keys(chains).forEach(chainName => {
+      chains[chainName].forEach(step => {
         if (step.category === 'COMMS') {
           totalCommsStepsDefined++;
         }
       });
       const completedCount = chainProgress[chainName] || 0;
       for (let i = 0; i < completedCount; i++) {
-        const step = CHAINS[chainName][i];
+        const step = chains[chainName][i];
         if (step && step.category === 'COMMS') {
           totalCommsStepsCompleted++;
         }
       }
     });
-    const commsFixedTasks = FIXED_TASKS.filter(t => t.category === 'COMMS');
+    const commsFixedTasks = fixedTasks.filter(t => t.category === 'COMMS');
     const commsFixedCompleted = commsFixedTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
-    const comms = (totalCommsStepsDefined + commsFixedTasks.length * 7) > 0 
-      ? Math.min(100, Math.round(((totalCommsStepsCompleted + commsFixedCompleted) / (totalCommsStepsDefined + commsFixedTasks.length * 7)) * 100)) 
+    const comms = (totalCommsStepsDefined + commsFixedTasks.length * activeDays7) > 0
+      ? Math.min(100, Math.round(((totalCommsStepsCompleted + commsFixedCompleted) / (totalCommsStepsDefined + commsFixedTasks.length * activeDays7)) * 100))
       : 0;
 
     // 5. DISCIPLINE — Schedule adherence
-    // = (DISCIPLINE fixed tasks completed last 7 days) / (DISCIPLINE fixed tasks × 7) × 100
-    const disciplineTasks = FIXED_TASKS.filter(t => t.category === 'DISCIPLINE');
+    // = (DISCIPLINE fixed tasks completed last 7 days) / (DISCIPLINE fixed tasks × activeDays7) × 100
+    const disciplineTasks = fixedTasks.filter(t => t.category === 'DISCIPLINE');
     const disciplineCompleted = disciplineTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
-    const discipline = disciplineTasks.length > 0 ? Math.min(100, Math.round((disciplineCompleted / (disciplineTasks.length * 7)) * 100)) : 0;
+    const discipline = disciplineTasks.length > 0 ? Math.min(100, Math.round((disciplineCompleted / (disciplineTasks.length * activeDays7)) * 100)) : 0;
 
     // 6. ENDURANCE — Physical/mental
-    // = (PHYSICAL + SOCIAL fixed tasks completed last 7 days) / ((PHYSICAL + SOCIAL fixed tasks) × 7) × 100
-    const enduranceTasks = FIXED_TASKS.filter(t => t.category === 'PHYSICAL' || t.category === 'SOCIAL');
+    // = (PHYSICAL + SOCIAL fixed tasks completed last 7 days) / ((PHYSICAL + SOCIAL fixed tasks) × activeDays7) × 100
+    const enduranceTasks = fixedTasks.filter(t => t.category === 'PHYSICAL' || t.category === 'SOCIAL');
     const enduranceCompleted = enduranceTasks.reduce((sum, t) => sum + (counts7Days[t.id] || 0), 0);
-    const endurance = enduranceTasks.length > 0 ? Math.min(100, Math.round((enduranceCompleted / (enduranceTasks.length * 7)) * 100)) : 0;
+    const endurance = enduranceTasks.length > 0 ? Math.min(100, Math.round((enduranceCompleted / (enduranceTasks.length * activeDays7)) * 100)) : 0;
 
     return {
       sigint,
@@ -650,7 +953,7 @@ export default function App() {
       discipline,
       endurance
     };
-  }, [dailyState.completedTaskIds, chainProgress]);
+  }, [dailyState.completedTaskIds, chainProgress, fixedTasks, chains, events]);
 
   // Level computation from XP
   const levelProgress = useMemo(() => {
@@ -703,7 +1006,7 @@ export default function App() {
               }
             });
           }
-        } catch {}
+        } catch { }
       }
     });
     const applyRolesPct = Math.min(100, Math.round((applyRolesCount / 35) * 100));
@@ -720,7 +1023,7 @@ export default function App() {
         if (parts.length === 3) {
           const chainName = parts[1];
           const stepIdx = parseInt(parts[2], 10);
-          const chain = CHAINS[chainName];
+          const chain = chains[chainName];
           if (chain && chain[stepIdx]) {
             const task = chain[stepIdx];
             if (task.category === 'LABS' || task.category === 'BUILD') {
@@ -729,7 +1032,7 @@ export default function App() {
           }
         }
       } else {
-        const task = FIXED_TASKS.find(t => t.id === id);
+        const task = fixedTasks.find(t => t.id === id);
         if (task && (task.category === 'LABS' || task.category === 'BUILD')) {
           labsBuildCount++;
         }
@@ -748,7 +1051,7 @@ export default function App() {
               }
             });
           }
-        } catch {}
+        } catch { }
       }
     });
     const labsBuildPct = Math.min(100, Math.round((labsBuildCount / 40) * 100));
@@ -756,8 +1059,8 @@ export default function App() {
 
     const totalPct = Math.round(sigintContribution + applyRolesContribution + commsContribution + labsBuildContribution);
     return Math.min(100, totalPct);
-  }, [computedStats, dailyState.completedTaskIds]);
-  
+  }, [computedStats, dailyState.completedTaskIds, chains, fixedTasks]);
+
   // Particle effects for checked item XP gains
   const [particles, setParticles] = useState([]);
 
@@ -795,36 +1098,36 @@ export default function App() {
       const rotationOrder = ['NETWORKING', 'LINUX', 'SOC_OPERATIONS', 'WEB_SECURITY', 'TOOLS_MASTERY', 'ACTIVE_DIRECTORY', 'INTERVIEW_PREP', 'THM_LABS'];
       const dayIndex = Math.floor(Date.now() / 86400000);
       const defaultDomain = rotationOrder[dayIndex % rotationOrder.length];
-      
+
       const todayISO = getTodayString(); // YYYY-MM-DD
       const todayDateStr = new Date().toDateString(); // Wed May 27 2026
-      
+
       let domainVal = defaultDomain;
       if (typeof window !== 'undefined' && window.storage && typeof window.storage.get === 'function') {
         try {
           const storedDateStr = await window.storage.get(`activeDomain:${todayDateStr}`);
           const storedISOStr = await window.storage.get(`activeDomain:${todayISO}`);
           const stored = storedDateStr || storedISOStr;
-          
+
           if (stored) {
             domainVal = typeof stored === 'object' && stored !== null && 'value' in stored ? stored.value : (typeof stored === 'string' ? stored : defaultDomain);
           }
-          
+
           await window.storage.set(`activeDomain:${todayDateStr}`, domainVal);
           await window.storage.set(`activeDomain:${todayISO}`, domainVal);
         } catch (e) {
           console.error("Failed to read/write activeDomain via window.storage", e);
         }
       } else {
-        const localDateStr = localStorage.getItem(`activeDomain:${todayDateStr}`);
-        const localISOStr = localStorage.getItem(`activeDomain:${todayISO}`);
+        const localDateStr = storage.getItem(`activeDomain:${todayDateStr}`);
+        const localISOStr = storage.getItem(`activeDomain:${todayISO}`);
         const local = localDateStr || localISOStr;
-        
+
         if (local) {
           domainVal = local;
         }
-        localStorage.setItem(`activeDomain:${todayDateStr}`, domainVal);
-        localStorage.setItem(`activeDomain:${todayISO}`, domainVal);
+        storage.setItem(`activeDomain:${todayDateStr}`, domainVal);
+        storage.setItem(`activeDomain:${todayISO}`, domainVal);
       }
       setTodaysDomain(domainVal);
 
@@ -834,7 +1137,7 @@ export default function App() {
         try {
           const res = await window.storage.get('operator_completion_date');
           lastActiveDate = res ? (typeof res === 'object' && res.value !== undefined ? res.value : res) : null;
-        } catch {}
+        } catch { }
       }
       if (!lastActiveDate) {
         lastActiveDate = storage.getItem('operator_completion_date');
@@ -857,19 +1160,19 @@ export default function App() {
               const val = typeof yesterdayTimesRes === 'object' && yesterdayTimesRes.value !== undefined ? yesterdayTimesRes.value : yesterdayTimesRes;
               yesterdayTimes = typeof val === 'string' ? JSON.parse(val) : val;
             }
-          } catch {}
+          } catch { }
         } else {
           const yesterdayStateRaw = storage.getItem(`state:${lastActiveDate}`);
           if (yesterdayStateRaw) {
             try {
               completedYesterday = JSON.parse(yesterdayStateRaw)?.completedTaskIds || [];
-            } catch {}
+            } catch { }
           }
           const yesterdayTimesRaw = storage.getItem(`completion_times:${lastActiveDate}`);
           if (yesterdayTimesRaw) {
             try {
               yesterdayTimes = JSON.parse(yesterdayTimesRaw) || {};
-            } catch {}
+            } catch { }
           }
         }
 
@@ -882,14 +1185,14 @@ export default function App() {
               const val = typeof res === 'object' && res.value !== undefined ? res.value : res;
               localChainProg = typeof val === 'string' ? JSON.parse(val) : val;
             }
-          } catch {}
+          } catch { }
         }
         if (!localChainProg || Object.keys(localChainProg).length === 0) {
           const localSaved = storage.getItem('chainProgress');
           if (localSaved) {
             try {
               localChainProg = JSON.parse(localSaved) || {};
-            } catch {}
+            } catch { }
           }
         }
 
@@ -927,22 +1230,46 @@ export default function App() {
         setChainProgress(newChainProgress);
         storage.setItem('chainProgress', JSON.stringify(newChainProgress));
         if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set('chainProgress', JSON.stringify(newChainProgress));
+          try {
+            await window.storage.set('chainProgress', JSON.stringify(newChainProgress));
+          } catch (e) {
+            console.warn("window.storage.set chainProgress failed", e);
+          }
         }
+
+        const isYesterdayHoliday = storage.getItem(`holiday:${lastActiveDate}`) !== null;
+        let yesterdayEvents = [];
+        try {
+          const saved = storage.getItem('events');
+          if (saved) yesterdayEvents = JSON.parse(saved) || [];
+        } catch { }
+        const isYesterdaySuppressed = yesterdayEvents.some(evt =>
+          evt.missionsActive === false && lastActiveDate >= evt.startDate && lastActiveDate <= evt.endDate
+        );
 
         // Compile logs for yesterday
         const logEntries = [];
-        FIXED_TASKS.forEach(task => {
+        getDynamicFixedTasks().forEach(task => {
           const isCompleted = completedYesterday.includes(task.id);
-          const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
-          logEntries.push({
-            taskName: task.title,
-            tag: task.category,
-            xp: task.xp,
-            completedAt: isCompleted ? (yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`) : null,
-            type: isCompleted ? 'completed' : 'missed',
-            ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
-          });
+          if (isCompleted) {
+            logEntries.push({
+              taskName: task.title,
+              tag: task.category,
+              xp: task.xp,
+              completedAt: yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`,
+              type: 'completed'
+            });
+          } else if (!isYesterdayHoliday && !isYesterdaySuppressed) {
+            const isMissedPenalized = ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+            logEntries.push({
+              taskName: task.title,
+              tag: task.category,
+              xp: task.xp,
+              completedAt: null,
+              type: 'missed',
+              ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
+            });
+          }
         });
 
         completedYesterday.forEach(taskId => {
@@ -951,7 +1278,7 @@ export default function App() {
             if (parts.length === 3) {
               const chainName = parts[1];
               const stepIdx = parseInt(parts[2], 10);
-              const chain = CHAINS[chainName];
+              const chain = chains[chainName];
               if (chain && chain[stepIdx]) {
                 const stepTask = chain[stepIdx];
                 logEntries.push({
@@ -968,7 +1295,11 @@ export default function App() {
 
         storage.setItem(`log:${lastActiveDate}`, JSON.stringify(logEntries));
         if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+          try {
+            await window.storage.set(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+          } catch (e) {
+            console.warn("window.storage.set log failed", e);
+          }
         }
 
         // Clean up yesterday's completed project tasks and completion times
@@ -980,7 +1311,11 @@ export default function App() {
         // Commit operator_completion_date as todayISO
         storage.setItem('operator_completion_date', todayISO);
         if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set('operator_completion_date', todayISO);
+          try {
+            await window.storage.set('operator_completion_date', todayISO);
+          } catch (e) {
+            console.warn("window.storage.set operator_completion_date failed", e);
+          }
         }
 
         // Step 3 — Then create fresh today state with no completed tasks
@@ -988,7 +1323,11 @@ export default function App() {
         setDailyState(freshTodayState);
         storage.setItem(`state:${todayISO}`, JSON.stringify(freshTodayState));
         if (typeof window !== 'undefined' && window.storage && typeof window.storage.set === 'function') {
-          await window.storage.set(`state:${todayISO}`, JSON.stringify(freshTodayState));
+          try {
+            await window.storage.set(`state:${todayISO}`, JSON.stringify(freshTodayState));
+          } catch (e) {
+            console.warn("window.storage.set state failed", e);
+          }
         }
       }
     };
@@ -1002,6 +1341,18 @@ export default function App() {
     if (dismissed === 'true') return false;
 
     const yesterday = getYesterdayString();
+    const yesterdayHoliday = storage.getItem(`holiday:${yesterday}`) !== null;
+    let yesterdayEvents = [];
+    try {
+      const saved = storage.getItem('events');
+      if (saved) yesterdayEvents = JSON.parse(saved) || [];
+    } catch { }
+    const yesterdaySuppressed = yesterdayEvents.some(evt =>
+      evt.missionsActive === false && yesterday >= evt.startDate && yesterday <= evt.endDate
+    );
+
+    if (yesterdayHoliday || yesterdaySuppressed) return false;
+
     const yesterdayLogsRaw = storage.getItem(`log:${yesterday}`);
     if (yesterdayLogsRaw) {
       try {
@@ -1034,7 +1385,7 @@ export default function App() {
     if (!isAuthenticated) return;
     const today = getTodayString();
     const stored = storage.getItem(`flavor:${today}`);
-    
+
     let hasValidStored = false;
     if (stored) {
       try {
@@ -1053,9 +1404,9 @@ export default function App() {
     if (!hasValidStored) {
       setIsFlavorLoading(true);
       const allTasks = [
-        ...FIXED_TASKS.map(t => ({ id: t.id, name: t.title, tag: t.category })),
-        ...Object.keys(CHAINS).flatMap(chainName => 
-          CHAINS[chainName].map((task, stepIdx) => ({
+        ...fixedTasks.map(t => ({ id: t.id, name: t.title, tag: t.category })),
+        ...Object.keys(chains).flatMap(chainName =>
+          chains[chainName].map((task, stepIdx) => ({
             id: `chain:${chainName}:${stepIdx}`,
             name: task.title,
             tag: task.category
@@ -1080,14 +1431,14 @@ export default function App() {
           setIsFlavorLoading(false);
         });
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, fixedTasks, chains]);
 
   // Helper to retrieve completed fixed task counts for the last 30 days
   const getCompletedCountsForLast30Days = () => {
     const today = getTodayString();
     const counts = {};
-    
-    FIXED_TASKS.forEach(t => {
+
+    fixedTasks.forEach(t => {
       counts[t.id] = 0;
     });
 
@@ -1095,7 +1446,7 @@ export default function App() {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      
+
       if (dateStr === today) {
         dailyState.completedTaskIds.forEach(id => {
           if (id.startsWith('fixed:')) {
@@ -1110,14 +1461,14 @@ export default function App() {
             if (Array.isArray(logs)) {
               logs.forEach(log => {
                 if (log.type === 'completed') {
-                  const fixedTask = FIXED_TASKS.find(t => t.title === log.taskName);
+                  const fixedTask = fixedTasks.find(t => t.title === log.taskName);
                   if (fixedTask) {
                     counts[fixedTask.id] = (counts[fixedTask.id] || 0) + 1;
                   }
                 }
               });
             }
-          } catch {}
+          } catch { }
         }
       }
     }
@@ -1129,7 +1480,7 @@ export default function App() {
     const end = new Date();
     const start = new Date();
     start.setDate(start.getDate() - 29);
-    
+
     const formatDate = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     return `${formatDate(start)} TO ${formatDate(end)}`;
   };
@@ -1137,11 +1488,11 @@ export default function App() {
   // Automated Weekly AI Review background fetch
   useEffect(() => {
     if (!isAuthenticated) return;
-    
+
     const isoWeek = getISOWeekString();
     const storedReview = storage.getItem(`weeklyReview:${isoWeek}`);
     const dismissed = storage.getItem(`dismissedReview:${isoWeek}`) === 'true';
-    
+
     if (storedReview) {
       try {
         const parsed = JSON.parse(storedReview);
@@ -1157,7 +1508,7 @@ export default function App() {
 
     const todayDay = new Date().getDay(); // 1 = Monday
     const isMonday = todayDay === 1;
-    
+
     const lastReviewDateStr = storage.getItem('last_weekly_review_date');
     let moreThan7Days = false;
     if (lastReviewDateStr) {
@@ -1179,9 +1530,9 @@ export default function App() {
         const d = new Date();
         d.setDate(d.getDate() - i);
         const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        
+
         if (dateStr === today) {
-          FIXED_TASKS.forEach(task => {
+          fixedTasks.forEach(task => {
             const isCompleted = dailyState.completedTaskIds.includes(task.id);
             last7DaysLogs.push({
               taskName: task.title,
@@ -1196,7 +1547,7 @@ export default function App() {
               if (parts.length === 3) {
                 const chainName = parts[1];
                 const stepIdx = parseInt(parts[2], 10);
-                const chain = CHAINS[chainName];
+                const chain = chains[chainName];
                 if (chain && chain[stepIdx]) {
                   last7DaysLogs.push({
                     taskName: chain[stepIdx].title,
@@ -1223,7 +1574,7 @@ export default function App() {
                   });
                 });
               }
-            } catch {}
+            } catch { }
           }
         }
       }
@@ -1244,12 +1595,12 @@ export default function App() {
         }
       });
     }
-  }, [isAuthenticated, computedStats, chainProgress, mainObjectiveProgress]);
+  }, [isAuthenticated, computedStats, chainProgress, mainObjectiveProgress, fixedTasks, chains]);
 
   // Push telemetry packages to Serverless KV Store
   const saveProgressToServer = (password, stateToday, prof, chainProg, timesToday) => {
     setSyncLoading(true);
-    
+
     const allKeys = [];
     try {
       for (let i = 0; i < storage.length; i++) {
@@ -1258,7 +1609,7 @@ export default function App() {
     } catch {
       allKeys.push(...Object.keys(storage));
     }
-    
+
     const logsToSync = {};
     const debriefsToSync = {};
     const dayClosedToSync = {};
@@ -1300,16 +1651,16 @@ export default function App() {
         }
       })
     })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        console.log("Telemetry successfully synchronized to Cloudflare KV.");
-      }
-    })
-    .catch(err => console.error("Telemetry sync error", err))
-    .finally(() => {
-      setSyncLoading(false);
-    });
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          console.log("Telemetry successfully synchronized to Cloudflare KV.");
+        }
+      })
+      .catch(err => console.error("Telemetry sync error", err))
+      .finally(() => {
+        setSyncLoading(false);
+      });
   };
 
   // Pull Telemetry progress package from Serverless KV Store
@@ -1321,7 +1672,7 @@ export default function App() {
           const remoteData = data.progress;
           const today = getTodayString();
           const yesterday = getYesterdayString();
-          
+
           let resolvedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
           if (remoteData.profile) {
             resolvedProfile = { ...remoteData.profile };
@@ -1336,7 +1687,7 @@ export default function App() {
               resolvedProfile.streak = 0;
             }
           }
-          
+
           // Restore today's daily state
           let resolvedState = { completedTaskIds: [], unlockedChainSteps: {} };
           if (remoteData.profile && remoteData.profile.lastActiveDate === today) {
@@ -1347,7 +1698,7 @@ export default function App() {
               };
             }
           }
-          
+
           // Restore chainProgress
           let resolvedChainProgress = {
             'NETWORKING': 0,
@@ -1359,7 +1710,7 @@ export default function App() {
             'INTERVIEW PREP': 0,
             'THM / LABS': 0
           };
-          
+
           let localChainProgress = {};
           const localSaved = storage.getItem('chainProgress');
           if (localSaved) {
@@ -1427,14 +1778,14 @@ export default function App() {
           } catch (e) {
             console.error("Failed to reconstruct resolvedChainProgress from historical states/logs", e);
           }
-          
+
           // Restore completion times
           let resolvedCompletionTimes = {};
           if (remoteData.completionTimesToday && typeof remoteData.completionTimesToday === 'object') {
             resolvedCompletionTimes = remoteData.completionTimesToday;
           }
           storage.setItem(`completion_times:${today}`, JSON.stringify(resolvedCompletionTimes));
-          
+
           // Restore logs
           if (remoteData.logs) {
             Object.keys(remoteData.logs).forEach(k => {
@@ -1462,7 +1813,7 @@ export default function App() {
               storage.setItem(k, remoteData.flavors[k]);
             });
           }
-          
+
           // Restore projectStatus
           let resolvedProjectStatus = { 'ad-lab': 'ACTIVE', 'threat-intel': 'QUEUED', 'cloud-scanner': 'QUEUED' };
           if (remoteData.projectStatus && typeof remoteData.projectStatus === 'object') {
@@ -1481,10 +1832,10 @@ export default function App() {
 
           setDailyState(resolvedState);
           storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
-          
+
           setChainProgress(resolvedChainProgress);
           storage.setItem('chainProgress', JSON.stringify(resolvedChainProgress));
-          
+
           setProfile(resolvedProfile);
           storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
 
@@ -1499,7 +1850,7 @@ export default function App() {
               if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                 setFlavors(parsed);
               }
-            } catch {}
+            } catch { }
           }
         } else {
           // Push initial profile to Cloudflare KV if none exists yet
@@ -1521,21 +1872,21 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password: savedPasscode })
       })
-      .then(res => res.json())
-      .then(data => {
-        if (data.success) {
-          setPasscode(savedPasscode);
-          setIsAuthenticated(true);
-          fetchRemoteProgress(savedPasscode);
-        } else {
-          storage.removeItem('operator_passcode');
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setPasscode(savedPasscode);
+            setIsAuthenticated(true);
+            fetchRemoteProgress(savedPasscode);
+          } else {
+            storage.removeItem('operator_passcode');
+            setIsInitialLoading(false);
+          }
+        })
+        .catch(err => {
+          console.error("Mount auth verification failed", err);
           setIsInitialLoading(false);
-        }
-      })
-      .catch(err => {
-        console.error("Mount auth verification failed", err);
-        setIsInitialLoading(false);
-      });
+        });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1543,7 +1894,7 @@ export default function App() {
   // Handle End Shift and AI Debrief fetching
   const handleEndShift = async () => {
     const today = getTodayString();
-    
+
     if (isDayClosed) {
       // Reopen stored debrief text
       const stored = storage.getItem(`debrief:${today}`);
@@ -1556,7 +1907,7 @@ export default function App() {
 
     // Collect today's performance state
     const completedTasks = [];
-    const missedFixedTasks = [];
+    const missedTasks = [];
     let totalXpEarned = 0;
 
     dailyState.completedTaskIds.forEach(id => {
@@ -1565,43 +1916,64 @@ export default function App() {
         if (parts.length === 3) {
           const chainName = parts[1];
           const stepIdx = parseInt(parts[2], 10);
-          const chain = CHAINS[chainName];
+          const chain = chains[chainName];
           if (chain && chain[stepIdx]) {
             const task = chain[stepIdx];
-            completedTasks.push(task.title);
+            completedTasks.push({ name: task.title, tag: task.category, xp: task.xp });
             totalXpEarned += task.xp;
           }
         }
       } else {
-        const task = FIXED_TASKS.find(t => t.id === id);
+        const task = fixedTasks.find(t => t.id === id);
         if (task) {
-          completedTasks.push(task.title);
+          completedTasks.push({ name: task.title, tag: task.category, xp: task.xp });
           totalXpEarned += task.xp;
         }
       }
     });
 
-    FIXED_TASKS.forEach(task => {
+    // Include completed project tasks today:
+    Object.keys(projectCompletedTasks).forEach(projId => {
+      const project = PROJECTS.find(p => p.id === projId);
+      const completedToday = projectCompletedTasks[projId] || [];
+      completedToday.forEach(taskId => {
+        const task = project?.tasks.find(t => t.id === taskId);
+        if (task) {
+          completedTasks.push({ name: task.name, tag: 'OPS', xp: task.xp });
+          totalXpEarned += task.xp;
+        }
+      });
+    });
+
+    fixedTasks.forEach(task => {
       const isCompleted = dailyState.completedTaskIds.includes(task.id);
       if (!isCompleted) {
-        missedFixedTasks.push(task.title);
-        const isMissedPenalized = ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
-        if (isMissedPenalized) {
-          totalXpEarned -= Math.floor(task.xp * 0.5);
+        missedTasks.push({ name: task.title, tag: task.category });
+
+        const isTodayHoliday = storage.getItem(`holiday:${today}`) !== null;
+        let todayEvents = [];
+        try {
+          const saved = storage.getItem('events');
+          if (saved) todayEvents = JSON.parse(saved) || [];
+        } catch { }
+        const isTodaySuppressed = todayEvents.some(evt =>
+          evt.missionsActive === false && today >= evt.startDate && today <= evt.endDate
+        );
+
+        if (!isTodayHoliday && !isTodaySuppressed) {
+          const isMissedPenalized = ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+          if (isMissedPenalized) {
+            totalXpEarned -= Math.floor(task.xp * 0.5);
+          }
         }
       }
     });
 
-    const chainPositions = {};
-    Object.keys(CHAINS).forEach(chainName => {
-      chainPositions[chainName] = chainProgress[chainName];
-    });
-
     const payload = {
-      completed: completedTasks,
-      missed: missedFixedTasks,
+      completed: completedTasks.map(t => ({ name: t.name, tag: t.tag, xp: t.xp })),
+      missed: missedTasks.map(t => ({ name: t.name, tag: t.tag })),
       xpEarned: totalXpEarned,
-      chainProgress
+      chainProgress: chainProgress
     };
 
     try {
@@ -1615,6 +1987,7 @@ export default function App() {
     } catch (err) {
       console.error(err);
       setDebriefError(true);
+      setDebriefText('COMMS ERROR: Commander unavailable. File your own report.');
     } finally {
       setDebriefLoading(false);
     }
@@ -1626,30 +1999,49 @@ export default function App() {
       const today = getTodayString();
       const logEntries = [];
 
+      const isTodayHoliday = storage.getItem(`holiday:${today}`) !== null;
+      let todayEvents = [];
+      try {
+        const saved = storage.getItem('events');
+        if (saved) todayEvents = JSON.parse(saved) || [];
+      } catch { }
+      const isTodaySuppressed = todayEvents.some(evt =>
+        evt.missionsActive === false && today >= evt.startDate && today <= evt.endDate
+      );
+
       // Process today's fixed tasks (both completed and missed)
-      FIXED_TASKS.forEach(task => {
+      fixedTasks.forEach(task => {
         const isCompleted = dailyState.completedTaskIds.includes(task.id);
-        const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
-        
-        logEntries.push({
-          taskName: task.title,
-          tag: task.category,
-          xp: task.xp,
-          completedAt: isCompleted ? (() => {
-            const timesRaw = storage.getItem(`completion_times:${today}`);
-            if (timesRaw) {
-              try {
-                const parsed = JSON.parse(timesRaw);
-                if (parsed && typeof parsed === 'object') {
-                  return parsed[task.id] || new Date().toISOString();
-                }
-              } catch {}
-            }
-            return new Date().toISOString();
-          })() : null,
-          type: isCompleted ? 'completed' : 'missed',
-          ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
-        });
+        if (isCompleted) {
+          logEntries.push({
+            taskName: task.title,
+            tag: task.category,
+            xp: task.xp,
+            completedAt: (() => {
+              const timesRaw = storage.getItem(`completion_times:${today}`);
+              if (timesRaw) {
+                try {
+                  const parsed = JSON.parse(timesRaw);
+                  if (parsed && typeof parsed === 'object') {
+                    return parsed[task.id] || new Date().toISOString();
+                  }
+                } catch { }
+              }
+              return new Date().toISOString();
+            })(),
+            type: 'completed'
+          });
+        } else if (!isTodayHoliday && !isTodaySuppressed) {
+          const isMissedPenalized = !isCompleted && ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+          logEntries.push({
+            taskName: task.title,
+            tag: task.category,
+            xp: task.xp,
+            completedAt: null,
+            type: 'missed',
+            ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
+          });
+        }
       });
 
       // Process today's completed chain tasks
@@ -1659,7 +2051,7 @@ export default function App() {
           if (parts.length === 3) {
             const chainName = parts[1];
             const stepIdx = parseInt(parts[2], 10);
-            const chain = CHAINS[chainName];
+            const chain = chains[chainName];
             if (chain && chain[stepIdx]) {
               const stepTask = chain[stepIdx];
               logEntries.push({
@@ -1674,7 +2066,7 @@ export default function App() {
                       if (parsed && typeof parsed === 'object') {
                         return parsed[id] || new Date().toISOString();
                       }
-                    } catch {}
+                    } catch { }
                   }
                   return new Date().toISOString();
                 })(),
@@ -1702,7 +2094,7 @@ export default function App() {
             if (parsed && typeof parsed === 'object') {
               timesObj = parsed;
             }
-          } catch {}
+          } catch { }
         }
         saveProgressToServer(activePasscode, dailyState, profile, chainProgress, timesObj);
       }
@@ -1735,14 +2127,14 @@ export default function App() {
   const handleToggleProjectTask = (projId, taskId, xpReward, e) => {
     if (isDayClosed) return;
     const today = getTodayString();
-    
+
     const currentProgressVal = projectProgress[projId] || 0;
     const completedToday = projectCompletedTasks[projId] || [];
     const isCompleted = completedToday.includes(taskId);
-    
+
     let nextCompleted = [...completedToday];
     let nextProgressVal = currentProgressVal;
-    
+
     // Handle particles
     if (!isCompleted && e) {
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1764,7 +2156,7 @@ export default function App() {
       // Mark task as completed today
       nextCompleted.push(taskId);
       nextProgressVal = currentProgressVal + 1;
-      
+
       // Trigger flash animation for the NEXT task
       const project = PROJECTS.find(p => p.id === projId);
       if (project && nextProgressVal < project.tasks.length) {
@@ -1777,16 +2169,16 @@ export default function App() {
       nextCompleted = nextCompleted.filter(id => id !== taskId);
       nextProgressVal = Math.max(0, currentProgressVal - 1);
     }
-    
+
     // Save to storage & update state
     const updatedCompleted = { ...projectCompletedTasks, [projId]: nextCompleted };
     setProjectCompletedTasks(updatedCompleted);
     storage.setItem(`projectCompleted:${projId}`, JSON.stringify(nextCompleted));
-    
+
     const updatedProgress = { ...projectProgress, [projId]: nextProgressVal };
     setProjectProgress(updatedProgress);
     storage.setItem('projectProgress', JSON.stringify(updatedProgress));
-    
+
     // Add XP to profile
     setProfile(prev => {
       let newTotalXp = prev.totalXp + (isCompleted ? -xpReward : xpReward);
@@ -1798,7 +2190,7 @@ export default function App() {
         totalXp: newTotalXp
       };
       storage.setItem('operator_profile', JSON.stringify(newProfile));
-      
+
       // Sync to server
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
@@ -1814,14 +2206,14 @@ export default function App() {
       const updatedStatus = { ...projectStatus, [projId]: 'DONE' };
       setProjectStatus(updatedStatus);
       storage.setItem('projectStatus', JSON.stringify(updatedStatus));
-      
+
       // Show accomplishments modal
       setCompletedProjectModal({
         show: true,
         projectName: project.name,
         totalXp: project.tasks.reduce((sum, t) => sum + t.xp, 0)
       });
-      
+
       // Sync to server with new DONE status
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
@@ -1844,31 +2236,42 @@ export default function App() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ password: passcode })
     })
-    .then(res => res.json())
-    .then(data => {
-      if (data.success) {
-        storage.setItem('operator_passcode', passcode);
-        setIsAuthenticated(true);
-        fetchRemoteProgress(passcode);
-      } else {
-        setAuthError('INVALID ACCESS TOKEN // ACCESS DENIED');
-      }
-    })
-    .catch(err => {
-      console.error(err);
-      setAuthError('CONNECTION ERROR // GATEWAY OFFLINE');
-    })
-    .finally(() => {
-      setAuthLoading(false);
-    });
+      .then(res => res.json())
+      .then(data => {
+        if (data.success) {
+          storage.setItem('operator_passcode', passcode);
+          setIsAuthenticated(true);
+          fetchRemoteProgress(passcode);
+        } else {
+          setAuthError('INVALID ACCESS TOKEN // ACCESS DENIED');
+        }
+      })
+      .catch(err => {
+        console.error(err);
+        setAuthError('CONNECTION ERROR // GATEWAY OFFLINE');
+      })
+      .finally(() => {
+        setAuthLoading(false);
+      });
   };
 
-  // Setup schedule highlighter
+  // Setup schedule highlighter and block synchronization
   useEffect(() => {
-    const updateActiveBlock = () => {
+    const refresh = () => {
+      const cur = getCurrentBlock(SCHEDULE);
+      if (cur) {
+        setCurrentBlock(cur.current);
+        setBlockProgress(cur.progress);
+      } else {
+        setCurrentBlock(null);
+        setBlockProgress(0);
+      }
+      const nxt = getNextBlock(SCHEDULE);
+      setNextBlock(nxt);
+
       const now = new Date();
       const currentMins = now.getHours() * 60 + now.getMinutes();
-      
+
       let calculatedMins = currentMins;
       if (currentMins < 330) {
         calculatedMins = currentMins + 1440;
@@ -1885,8 +2288,8 @@ export default function App() {
       setActiveBlockIndex(activeIndex);
     };
 
-    updateActiveBlock();
-    const interval = setInterval(updateActiveBlock, 10000);
+    refresh();
+    const interval = setInterval(refresh, 60000);
     return () => clearInterval(interval);
   }, []);
 
@@ -1907,20 +2310,20 @@ export default function App() {
     if (isDayClosed) return;
     const today = getTodayString();
     const yesterday = getYesterdayString();
-    
+
     // Copy today's daily state values
     const stateKey = `state:${today}`;
     let currentCompletedIds = [...dailyState.completedTaskIds];
     let currentUnlockedSteps = { ...dailyState.unlockedChainSteps };
-    
+
     const isCompleted = currentCompletedIds.includes(taskId);
-    
+
     // Particles for XP gains
     if (!isCompleted && e) {
       const rect = e.currentTarget.getBoundingClientRect();
       const x = rect.left + rect.width / 2;
       const y = rect.top;
-      
+
       const newParticle = {
         id: ++particleCounter,
         xp: xpReward,
@@ -1955,7 +2358,7 @@ export default function App() {
       if (!isCompleted) {
         // MARK PROGRESSIVE CHAIN TASK AS COMPLETED
         currentCompletedIds.push(taskId);
-        
+
         // Unlock next step index
         const chainLength = CHAINS[chainName].length;
         const nextStepIdx = stepIdx + 1;
@@ -1965,7 +2368,7 @@ export default function App() {
           setUnlockedTasks(prev => [...prev, nextStepId]);
           setJustUnlockedStepId(nextStepId);
         }
-        
+
         completionTimes[taskId] = new Date().toISOString();
         netXpChange = xpReward;
 
@@ -1974,7 +2377,7 @@ export default function App() {
         // UNMARK PROGRESSIVE CHAIN TASK
         // Unmarking removes this step and any higher chain steps that have been checked
         const stepsToRemove = [];
-        
+
         currentCompletedIds = currentCompletedIds.filter(id => {
           if (id.startsWith(`chain:${chainName}:`)) {
             const idx = parseInt(id.split(':')[2], 10);
@@ -2063,7 +2466,7 @@ export default function App() {
       };
 
       storage.setItem('operator_profile', JSON.stringify(newProfile));
-      
+
       // Synchronize changes to Cloudflare KV
       const activePasscode = passcode || storage.getItem('operator_passcode');
       if (activePasscode) {
@@ -2076,11 +2479,11 @@ export default function App() {
 
   // Determine active & visible chain task steps dynamically based on starting perm steps
   const getVisibleChainSteps = (chainName) => {
-    const chain = CHAINS[chainName];
+    const chain = chains[chainName];
     if (!chain) return [];
     const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
     const currentIdx = chainProgress[chainName] !== undefined ? chainProgress[chainName] : 0;
-    
+
     if (currentIdx >= tasksArray.length) {
       return [];
     }
@@ -2095,119 +2498,32 @@ export default function App() {
         stepIdx: idx,
         task: tasksArray[idx]
       });
-      
+
       if (isCompleted) {
         idx++;
       } else {
         break;
       }
     }
-    
+
     return visible;
   };
 
   const DAILY_OPS_FIXED_TASKS = useMemo(() => {
-    return FIXED_TASKS.filter(t => t.category !== 'PHYSICAL' && t.category !== 'DISCIPLINE');
-  }, []);
+    return fixedTasks.filter(t => t.category !== 'PHYSICAL' && t.category !== 'DISCIPLINE');
+  }, [fixedTasks]);
 
   const SIDE_OPS_FIXED_TASKS = useMemo(() => {
-    return FIXED_TASKS.filter(t => t.category === 'PHYSICAL' || t.category === 'DISCIPLINE');
-  }, []);
+    return fixedTasks.filter(t => t.category === 'PHYSICAL' || t.category === 'DISCIPLINE');
+  }, [fixedTasks]);
 
-  if (isInitialLoading) {
-    return (
-      <div className="login-overlay">
-        <div className="login-box" style={{ maxWidth: '380px', textAlign: 'center' }}>
-          <div className="login-title" style={{ justifyContent: 'center', marginBottom: '16px' }}>
-            <span className="pulse-dot"></span>
-            INITIALISING TAC-NET...
-          </div>
-          <div className="login-logs">
-            <span className="login-log-line">Establishing secure pipeline...</span>
-            <span className="login-log-line">Loading remote telemetry...</span>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isAuthenticated) {
-    return (
-      <div className="login-overlay">
-        <form className="login-box" onSubmit={handleLogin}>
-          <div className="login-title-bar">
-            <div className="login-title">
-              <span className="pulse-dot"></span>
-              SYSTEM SECURITY CONTROL
-            </div>
-          </div>
-          
-          <div className="login-logs">
-            <span className="login-log-line">[!] WARNING: ACCESS RESTRICTED TO AUTHORIZED OPERATORS ONLY</span>
-            <span className="login-log-line">[!] TARGET HOST: OPERATOR TERMINAL // DEEP GRID</span>
-            <span className="login-log-line">[!] ENTER MASTER PASSCODE TO DECRYPT INTERFACE</span>
-          </div>
-
-          <div className="login-input-group">
-            <label className="login-input-label">Authorization Token</label>
-            <div className="login-input-wrapper">
-              <span className="login-prompt-arrow">PASSCODE&gt;</span>
-              <input 
-                type="password" 
-                className="login-input" 
-                value={passcode} 
-                onChange={(e) => setPasscode(e.target.value)} 
-                required 
-                autoFocus
-              />
-            </div>
-          </div>
-
-          <button className="login-btn" type="submit" disabled={authLoading}>
-            {authLoading ? 'Verifying...' : 'Authorize Operator'}
-          </button>
-
-          {authError && (
-            <div className="login-error">
-              <span>[!] ERROR: {authError}</span>
-            </div>
-          )}
-        </form>
-      </div>
-    );
-  }
 
   // ==========================================
   // RENDER HELPERS FOR MULTI-PAGE SIDEBAR LAYOUT
   // ==========================================
 
   const renderScheduleBlock = () => {
-    const parseTimeToMinutes = (timeStr) => {
-      const [hours, minutes] = timeStr.split(':').map(Number);
-      return hours * 60 + minutes;
-    };
-
-    const SCHEDULE = [
-      { id: 's1', label: 'MORNING RITUAL', start: '06:00', end: '07:00', type: 'DISCIPLINE', description: 'No screen. Surya. Set intentions.' },
-      { id: 's2', label: 'SKILL BLOCK', start: '07:00', end: '09:00', type: 'ROADMAP', description: "Today's chain task. Deep focus only." },
-      { id: 's3', label: 'PROJECT SESSION', start: '09:00', end: '11:00', type: 'BUILD', description: 'Active project task. No distractions.' },
-      { id: 's4', label: 'JOB APPLICATIONS', start: '11:00', end: '12:30', type: 'OPS', description: 'Apply to 5 roles. Cold emails. LinkedIn.' },
-      { id: 's5', label: 'BREAK + FOOD', start: '12:30', end: '14:00', type: 'PHYSICAL', description: 'Eat. Rest. No guilt.' },
-      { id: 's6', label: 'NAP', start: '14:00', end: '15:00', type: 'PHYSICAL', description: 'Mandatory recovery.' },
-      { id: 's7', label: 'POST-NAP EXERCISE', start: '15:00', end: '15:45', type: 'PHYSICAL', description: 'Move. No excuses.' },
-      { id: 's8', label: 'LABS SESSION', start: '15:45', end: '18:00', type: 'LABS', description: 'THM room or PortSwigger lab.' },
-      { id: 's9', label: 'INTERVIEW PREP', start: '18:00', end: '19:30', type: 'COMMS', description: 'STAR answers. Record yourself. Review.' },
-      { id: 's10', label: 'INTEL READ', start: '19:30', end: '20:00', type: 'INTEL', description: 'One article. Threat intel or AppSec.' },
-      { id: 's11', label: 'EVENING PATROL', start: '20:00', end: '21:00', type: 'SOCIAL', description: 'Full hour walk. Real world. Phone away.' },
-      { id: 's12', label: 'AFTER ACTION REPORT', start: '21:00', end: '21:30', type: 'DISCIPLINE', description: 'Write what you did. Be honest.' },
-      { id: 's13', label: 'WIND DOWN', start: '21:30', end: '23:00', type: 'DISCIPLINE', description: 'No work. Read. Sleep before 1AM.' },
-    ];
-
-    const now = new Date();
-    const currentMinutes = now.getHours() * 60 + now.getMinutes();
-
-    // If before 06:00 or after 23:00
-    if (currentMinutes < 360 || currentMinutes >= 1380) {
+    if (!currentBlock) {
       return (
         <div className="schedule-card" style={{ border: '1px solid rgba(255, 255, 255, 0.1)', background: 'rgba(255, 255, 255, 0.02)' }}>
           <div className="schedule-header" style={{ justifyContent: 'center' }}>
@@ -2219,93 +2535,34 @@ export default function App() {
       );
     }
 
-    let activeBlock = null;
-    let activeIndex = -1;
-    for (let i = 0; i < SCHEDULE.length; i++) {
-      const block = SCHEDULE[i];
-      const startMins = parseTimeToMinutes(block.start);
-      const endMins = parseTimeToMinutes(block.end);
-      if (currentMinutes >= startMins && currentMinutes < endMins) {
-        activeBlock = block;
-        activeIndex = i;
-        break;
-      }
-    }
+    const activeBlock = currentBlock;
+    const progressPct = blockProgress * 100;
 
-    if (activeBlock) {
-      const startMins = parseTimeToMinutes(activeBlock.start);
-      const endMins = parseTimeToMinutes(activeBlock.end);
-      const progressPct = ((currentMinutes - startMins) / (endMins - startMins)) * 100;
-      const nextBlock = activeIndex + 1 < SCHEDULE.length ? SCHEDULE[activeIndex + 1] : null;
-
-      return (
-        <div className="schedule-card">
-          <div className="schedule-header">
-            <span className="schedule-badge now" style={{ display: 'inline-block' }}>NOW</span>
-            <span className="timeline-type-tag" style={{ color: 'var(--accent-amber)', borderColor: 'var(--accent-amber)' }}>{activeBlock.type}</span>
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent-amber)', letterSpacing: '0.05em' }}>
-            {activeBlock.label}
-          </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            TIME RANGE: {activeBlock.start} - {activeBlock.end}
-          </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-main)', marginTop: '4px' }}>
-            {activeBlock.description}
-          </div>
-          <div className="schedule-progress-outer">
-            <div className="schedule-progress-inner" style={{ width: `${progressPct}%` }}></div>
-          </div>
-          {nextBlock && (
-            <div className="schedule-next-label">
-              NEXT: {nextBlock.label} AT {nextBlock.start}
-            </div>
-          )}
+    return (
+      <div className="schedule-card">
+        <div className="schedule-header">
+          <span className="schedule-badge now" style={{ display: 'inline-block' }}>NOW</span>
+          <span className="timeline-type-tag" style={{ color: 'var(--accent-amber)', borderColor: 'var(--accent-amber)' }}>{activeBlock.type}</span>
         </div>
-      );
-    }
-
-    let nextBlock = null;
-    let nextIndex = -1;
-    for (let i = 0; i < SCHEDULE.length; i++) {
-      const block = SCHEDULE[i];
-      const startMins = parseTimeToMinutes(block.start);
-      if (currentMinutes < startMins) {
-        nextBlock = block;
-        nextIndex = i;
-        break;
-      }
-    }
-
-    if (nextBlock) {
-      return (
-        <div className="schedule-card">
-          <div className="schedule-header">
-            <span className="schedule-badge next">NEXT</span>
-            <span className="timeline-type-tag">{nextBlock.type}</span>
-          </div>
-          <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent-amber)', letterSpacing: '0.05em' }}>
-            {nextBlock.label}
-          </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
-            STARTING AT: {nextBlock.start} - {nextBlock.end}
-          </div>
-          <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-main)', marginTop: '4px' }}>
-            {nextBlock.description}
-          </div>
-          <div className="schedule-progress-outer">
-            <div className="schedule-progress-inner" style={{ width: '0%' }}></div>
-          </div>
-          {nextIndex + 1 < SCHEDULE.length && (
-            <div className="schedule-next-label">
-              FOLLOWED BY: {SCHEDULE[nextIndex + 1].label} AT {SCHEDULE[nextIndex + 1].start}
-            </div>
-          )}
+        <div style={{ fontSize: '20px', fontWeight: 'bold', color: 'var(--accent-amber)', letterSpacing: '0.05em' }}>
+          {activeBlock.label}
         </div>
-      );
-    }
-
-    return null;
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-muted)' }}>
+          TIME RANGE: {activeBlock.start} - {activeBlock.end}
+        </div>
+        <div style={{ fontFamily: 'var(--font-mono)', fontSize: '13px', color: 'var(--text-main)', marginTop: '4px' }}>
+          {activeBlock.description}
+        </div>
+        <div className="schedule-progress-outer">
+          <div className="schedule-progress-inner" style={{ width: `${progressPct}%` }}></div>
+        </div>
+        {nextBlock && (
+          <div className="schedule-next-label">
+            NEXT: {nextBlock.label} AT {nextBlock.start}
+          </div>
+        )}
+      </div>
+    );
   };
 
   const renderTodaysBriefing = () => {
@@ -2343,10 +2600,10 @@ export default function App() {
     })();
 
     const tasksLeft = (() => {
-      const fixedLeft = FIXED_TASKS.filter(t => !dailyState.completedTaskIds.includes(t.id)).length;
+      const fixedLeft = fixedTasks.filter(t => !dailyState.completedTaskIds.includes(t.id)).length;
       const mappedActive = mapDomainKey(todaysDomain);
       const currentStep = chainProgress[mappedActive] || 0;
-      const chain = CHAINS[mappedActive];
+      const chain = chains[mappedActive];
       const chainTaskId = `chain:${mappedActive}:${currentStep}`;
       const chainLeft = (chain && currentStep < chain.length && !dailyState.completedTaskIds.includes(chainTaskId)) ? 1 : 0;
       let projectLeft = 0;
@@ -2361,13 +2618,14 @@ export default function App() {
     })();
 
     const chainId = mapDomainKey(todaysDomain);
+    const activeSuppressedEvent = getActiveMissionsSuppressedEventToday();
 
     return (
       <section className="main-objective-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <h2 className="panel-title">Today's Briefing</h2>
         <hr className="section-divider" />
         <div className="main-objective-card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          
+
           <div style={{
             fontFamily: 'var(--font-mono)',
             fontSize: '14px',
@@ -2383,12 +2641,24 @@ export default function App() {
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               &gt; ACTIVE SKILL PATH MISSION
             </span>
-            {(() => {
-              const chain = CHAINS[chainId];
+            {activeSuppressedEvent ? (
+              <div style={{
+                background: 'rgba(100, 116, 139, 0.05)',
+                border: '1px dashed var(--text-muted)',
+                color: 'var(--text-muted)',
+                padding: '10px 14px',
+                fontSize: '13px',
+                fontFamily: 'var(--font-mono)',
+                textAlign: 'center'
+              }}>
+                [ PAUSED FOR EVENT: {activeSuppressedEvent.name.toUpperCase()} ]
+              </div>
+            ) : (() => {
+              const chain = chains[chainId];
               if (!chain) return null;
               const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
               const currentIdx = chainProgress[chainId] !== undefined ? chainProgress[chainId] : 0;
-              
+
               if (currentIdx >= tasksArray.length) {
                 return (
                   <div style={{
@@ -2417,7 +2687,7 @@ export default function App() {
                   task: tasksArray[idx],
                   completed: isCompleted
                 });
-                
+
                 if (isCompleted) {
                   idx++;
                 } else {
@@ -2432,8 +2702,8 @@ export default function App() {
                     const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
                     const briefing = flavors[id]?.briefing;
                     return (
-                      <div 
-                        key={id} 
+                      <div
+                        key={id}
                         className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
                         onClick={(e) => handleToggleMission(id, task.xp, true, chainId, stepIdx, e)}
                         style={{ width: '100%', padding: '10px 14px' }}
@@ -2445,12 +2715,12 @@ export default function App() {
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
                             <span className="mission-title" style={{ fontSize: '13px' }}>{displayTitle}</span>
                             {isJustUnlocked && (
-                              <span style={{ 
-                                fontSize: '9px', 
-                                fontFamily: 'var(--font-mono)', 
-                                color: 'var(--accent-green)', 
-                                border: '1px solid var(--accent-green)', 
-                                padding: '0 3px', 
+                              <span style={{
+                                fontSize: '9px',
+                                fontFamily: 'var(--font-mono)',
+                                color: 'var(--accent-green)',
+                                border: '1px solid var(--accent-green)',
+                                padding: '0 3px',
                                 marginLeft: '6px',
                                 textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
                                 whiteSpace: 'nowrap'
@@ -2460,11 +2730,11 @@ export default function App() {
                             )}
                           </div>
                           {briefing && (
-                            <span className="mission-briefing" style={{ 
-                              display: 'block', 
-                              fontSize: '10px', 
-                              color: 'var(--text-muted)', 
-                              fontFamily: 'var(--font-mono)' 
+                            <span className="mission-briefing" style={{
+                              display: 'block',
+                              fontSize: '10px',
+                              color: 'var(--text-muted)',
+                              fontFamily: 'var(--font-mono)'
                             }}>
                               {briefing}
                             </span>
@@ -2486,17 +2756,29 @@ export default function App() {
             <span style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase' }}>
               &gt; ACTIVE PROJECT OPS
             </span>
-            {activeProject ? (
+            {activeSuppressedEvent ? (
+              <div style={{
+                background: 'rgba(100, 116, 139, 0.05)',
+                border: '1px dashed var(--text-muted)',
+                color: 'var(--text-muted)',
+                padding: '10px 14px',
+                fontSize: '13px',
+                fontFamily: 'var(--font-mono)',
+                textAlign: 'center'
+              }}>
+                [ PAUSED FOR EVENT: {activeSuppressedEvent.name.toUpperCase()} ]
+              </div>
+            ) : activeProject ? (
               (() => {
                 const progIdx = projectProgress[activeProject.id] || 0;
                 const completedToday = projectCompletedTasks[activeProject.id] || [];
-                
+
                 if (progIdx < activeProject.tasks.length) {
                   const task = activeProject.tasks[progIdx];
                   const isCompleted = completedToday.includes(task.id);
                   return (
-                    <div 
-                      key={task.id} 
+                    <div
+                      key={task.id}
                       className={`mission-card ${isCompleted ? 'completed' : ''}`}
                       onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
                       style={{ width: '100%', padding: '10px 14px' }}
@@ -2567,8 +2849,9 @@ export default function App() {
   };
 
   const renderPriorityMissions = () => {
+    const activeSuppressedEvent = getActiveMissionsSuppressedEventToday();
     const priorityMissions = (() => {
-      const uncompletedFixed = FIXED_TASKS.filter(t => !dailyState.completedTaskIds.includes(t.id));
+      const uncompletedFixed = fixedTasks.filter(t => !dailyState.completedTaskIds.includes(t.id));
       const sorted = [...uncompletedFixed].sort((a, b) => b.xp - a.xp);
       return sorted.slice(0, 4);
     })();
@@ -2577,44 +2860,58 @@ export default function App() {
       <section className="daily-ops-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         <h2 className="panel-title">Priority Missions</h2>
         <hr className="section-divider" />
-        <div className="missions-grid">
-          {priorityMissions.map(task => {
-            const isCompleted = dailyState.completedTaskIds.includes(task.id);
-            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
-            const briefing = flavors[task.id]?.briefing;
-            return (
-              <div 
-                key={task.id} 
-                className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
-              >
-                <div className="checkbox-container">
-                  <span className="checkmark-icon"></span>
-                </div>
-                <div className="mission-details">
-                  <span className="mission-title">{displayTitle}</span>
-                  {briefing && (
-                    <span className="mission-briefing" style={{ 
-                      display: 'block', 
-                      fontSize: '11px', 
-                      color: 'var(--text-muted)', 
-                      marginTop: '2px', 
-                      fontFamily: 'var(--font-mono)' 
-                    }}>
-                      {briefing}
-                    </span>
-                  )}
-                  <div className="mission-meta">
-                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                    <span className="xp-reward">+{task.xp} XP</span>
+        {activeSuppressedEvent ? (
+          <div className="warning-banner" style={{
+            background: 'rgba(100, 116, 139, 0.05)',
+            border: '1px solid var(--text-muted)',
+            padding: '12px 16px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            color: 'var(--text-muted)',
+            textAlign: 'center'
+          }}>
+            [ EVENT: {activeSuppressedEvent.name.toUpperCase()} — MISSIONS SUSPENDED ]
+          </div>
+        ) : (
+          <div className="missions-grid">
+            {priorityMissions.map(task => {
+              const isCompleted = dailyState.completedTaskIds.includes(task.id);
+              const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+              const briefing = flavors[task.id]?.briefing;
+              return (
+                <div
+                  key={task.id}
+                  className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                  onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+                >
+                  <div className="checkbox-container">
+                    <span className="checkmark-icon"></span>
+                  </div>
+                  <div className="mission-details">
+                    <span className="mission-title">{displayTitle}</span>
+                    {briefing && (
+                      <span className="mission-briefing" style={{
+                        display: 'block',
+                        fontSize: '11px',
+                        color: 'var(--text-muted)',
+                        marginTop: '2px',
+                        fontFamily: 'var(--font-mono)'
+                      }}>
+                        {briefing}
+                      </span>
+                    )}
+                    <div className="mission-meta">
+                      <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                      <span className="xp-reward">+{task.xp} XP</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
         <div style={{ marginTop: '12px', textAlign: 'center' }}>
-          <button 
+          <button
             onClick={() => setActivePage('missions')}
             style={{
               background: 'none',
@@ -2683,230 +2980,276 @@ export default function App() {
 
   const renderProjectOps = () => {
     if (!activeProject || renderedOpsTasks.length === 0) return null;
+    const activeSuppressedEvent = getActiveMissionsSuppressedEventToday();
     return (
       <section className="project-ops-section">
         <h2 className="panel-title">Project Ops // {activeProject.name}</h2>
         <hr className="section-divider" />
-        <div className="missions-grid" style={{ marginBottom: '24px' }}>
-          {renderedOpsTasks.map(({ task, completed }) => {
-            const isJustUnlocked = justUnlockedStepId === task.id;
-            return (
-              <div 
-                key={task.id} 
-                className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
-              >
-                <div className="checkbox-container">
-                  <span className="checkmark-icon"></span>
-                </div>
-                <div className="mission-details">
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                    <span className="mission-title">{task.name}</span>
-                    {isJustUnlocked && (
-                      <span style={{ 
-                        fontSize: '10px', 
-                        fontFamily: 'var(--font-mono)', 
-                        color: 'var(--accent-green)', 
-                        border: '1px solid var(--accent-green)', 
-                        padding: '0 4px', 
-                        marginLeft: '8px',
-                        textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
-                        whiteSpace: 'nowrap'
-                      }}>
-                        UNLOCKED
+        {activeSuppressedEvent ? (
+          <div className="warning-banner" style={{
+            background: 'rgba(100, 116, 139, 0.05)',
+            border: '1px solid var(--text-muted)',
+            padding: '12px 16px',
+            marginBottom: '24px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            color: 'var(--text-muted)',
+            textAlign: 'center'
+          }}>
+            [ EVENT: {activeSuppressedEvent.name.toUpperCase()} — PROJECTS SUSPENDED ]
+          </div>
+        ) : (
+          <div className="missions-grid" style={{ marginBottom: '24px' }}>
+            {renderedOpsTasks.map(({ task, completed }) => {
+              const isJustUnlocked = justUnlockedStepId === task.id;
+              return (
+                <div
+                  key={task.id}
+                  className={`mission-card ${completed ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                  onClick={(e) => handleToggleProjectTask(activeProject.id, task.id, task.xp, e)}
+                >
+                  <div className="checkbox-container">
+                    <span className="checkmark-icon"></span>
+                  </div>
+                  <div className="mission-details">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                      <span className="mission-title">{task.name}</span>
+                      {isJustUnlocked && (
+                        <span style={{
+                          fontSize: '10px',
+                          fontFamily: 'var(--font-mono)',
+                          color: 'var(--accent-green)',
+                          border: '1px solid var(--accent-green)',
+                          padding: '0 4px',
+                          marginLeft: '8px',
+                          textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                          whiteSpace: 'nowrap'
+                        }}>
+                          UNLOCKED
+                        </span>
+                      )}
+                    </div>
+                    <div className="mission-meta">
+                      <span className="badge badge-ops" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
+                        {task.phase}
                       </span>
-                    )}
-                  </div>
-                  <div className="mission-meta">
-                    <span className="badge badge-ops" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)' }}>
-                      {task.phase}
-                    </span>
-                    <span className="xp-reward">+{task.xp} XP</span>
+                      <span className="xp-reward">+{task.xp} XP</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     );
   };
 
   const renderDailyOps = () => {
+    const activeSuppressedEvent = getActiveMissionsSuppressedEventToday();
     return (
       <section className="daily-ops-section">
         <h2 className="panel-title">Daily Ops</h2>
         <hr className="section-divider" />
-        <div className="missions-grid">
-          {DAILY_OPS_FIXED_TASKS.map(task => {
-            const isCompleted = dailyState.completedTaskIds.includes(task.id);
-            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
-            const briefing = flavors[task.id]?.briefing;
-            return (
-              <div 
-                key={task.id} 
-                className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
-              >
-                <div className="checkbox-container">
-                  <span className="checkmark-icon"></span>
-                </div>
-                <div className="mission-details">
-                  <span className="mission-title">{displayTitle}</span>
-                  {briefing && (
-                    <span className="mission-briefing" style={{ 
-                      display: 'block', 
-                      fontSize: '11px', 
-                      color: 'var(--text-muted)', 
-                      marginTop: '2px', 
-                      fontFamily: 'var(--font-mono)' 
-                    }}>
-                      {briefing}
-                    </span>
-                  )}
-                  <div className="mission-meta">
-                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                    <span className="xp-reward">+{task.xp} XP</span>
+        {activeSuppressedEvent ? (
+          <div className="warning-banner" style={{
+            background: 'rgba(100, 116, 139, 0.05)',
+            border: '1px solid var(--text-muted)',
+            padding: '12px 16px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            color: 'var(--text-muted)',
+            textAlign: 'center'
+          }}>
+            [ EVENT: {activeSuppressedEvent.name.toUpperCase()} — MISSIONS SUSPENDED ]
+          </div>
+        ) : (
+          <div className="missions-grid">
+            {DAILY_OPS_FIXED_TASKS.map(task => {
+              const isCompleted = dailyState.completedTaskIds.includes(task.id);
+              const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+              const briefing = flavors[task.id]?.briefing;
+              return (
+                <div
+                  key={task.id}
+                  className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                  onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+                >
+                  <div className="checkbox-container">
+                    <span className="checkmark-icon"></span>
+                  </div>
+                  <div className="mission-details">
+                    <span className="mission-title">{displayTitle}</span>
+                    {briefing && (
+                      <span className="mission-briefing" style={{
+                        display: 'block',
+                        fontSize: '11px',
+                        color: 'var(--text-muted)',
+                        marginTop: '2px',
+                        fontFamily: 'var(--font-mono)'
+                      }}>
+                        {briefing}
+                      </span>
+                    )}
+                    <div className="mission-meta">
+                      <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                      <span className="xp-reward">+{task.xp} XP</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
 
-          {Object.keys(CHAINS).map(chainName => {
-            const mappedActive = mapDomainKey(todaysDomain);
-            if (chainName !== mappedActive) return null;
+            {Object.keys(chains).map(chainName => {
+              const mappedActive = mapDomainKey(todaysDomain);
+              if (chainName !== mappedActive) return null;
 
-            const visibleSteps = getVisibleChainSteps(chainName);
-            return (
-              <div key={chainName} style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
-                <div style={{
-                  fontFamily: 'var(--font-mono)',
-                  color: 'var(--accent-amber)',
-                  fontSize: '11px',
-                  fontWeight: 'bold',
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
-                  fontVariant: 'small-caps',
-                  marginBottom: '6px'
-                }}>
-                  TODAY'S SKILL: {chainName}
-                </div>
-                {visibleSteps.length === 0 ? (
+              const visibleSteps = getVisibleChainSteps(chainName);
+              return (
+                <div key={chainName} style={{ display: 'flex', flexDirection: 'column', gap: '8px', width: '100%' }}>
                   <div style={{
-                    background: 'rgba(34, 197, 94, 0.1)',
-                    border: '1px dashed var(--accent-green)',
-                    color: 'var(--accent-green)',
-                    padding: '12px 16px',
-                    fontSize: '13px',
                     fontFamily: 'var(--font-mono)',
-                    textAlign: 'center',
-                    textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                    color: 'var(--accent-amber)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    letterSpacing: '0.1em',
+                    textTransform: 'uppercase',
+                    fontVariant: 'small-caps',
+                    marginBottom: '6px'
                   }}>
-                    [ {chainName} CHAIN COMPLETE — ALL STEPS CLEARED ]
+                    TODAY'S SKILL: {chainName}
                   </div>
-                ) : (
-                  visibleSteps.map(({ id, stepIdx, task }) => {
-                    const isCompleted = dailyState.completedTaskIds.includes(id);
-                    const isJustUnlocked = justUnlockedStepId === id;
-                    const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
-                    const briefing = flavors[id]?.briefing;
-                    return (
-                      <div 
-                        key={id} 
-                        className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
-                        onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
-                      >
-                        <div className="checkbox-container">
-                          <span className="checkmark-icon"></span>
-                        </div>
-                        <div className="mission-details">
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
-                            <span className="mission-title">{displayTitle}</span>
-                            {isJustUnlocked && (
-                              <span style={{ 
-                                fontSize: '10px', 
-                                fontFamily: 'var(--font-mono)', 
-                                color: 'var(--accent-green)', 
-                                border: '1px solid var(--accent-green)', 
-                                padding: '0 4px', 
-                                marginLeft: '8px',
-                                textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
-                                whiteSpace: 'nowrap'
+                  {visibleSteps.length === 0 ? (
+                    <div style={{
+                      background: 'rgba(34, 197, 94, 0.1)',
+                      border: '1px dashed var(--accent-green)',
+                      color: 'var(--accent-green)',
+                      padding: '12px 16px',
+                      fontSize: '13px',
+                      fontFamily: 'var(--font-mono)',
+                      textAlign: 'center',
+                      textShadow: '0 0 4px rgba(34, 197, 94, 0.4)'
+                    }}>
+                      [ {chainName} CHAIN COMPLETE — ALL STEPS CLEARED ]
+                    </div>
+                  ) : (
+                    visibleSteps.map(({ id, stepIdx, task }) => {
+                      const isCompleted = dailyState.completedTaskIds.includes(id);
+                      const isJustUnlocked = justUnlockedStepId === id;
+                      const displayTitle = flavors[id]?.title ?? task.name ?? task.title;
+                      const briefing = flavors[id]?.briefing;
+                      return (
+                        <div
+                          key={id}
+                          className={`mission-card ${isCompleted ? 'completed' : ''} ${isJustUnlocked ? 'unlocked-flash' : ''}`}
+                          onClick={(e) => handleToggleMission(id, task.xp, true, chainName, stepIdx, e)}
+                        >
+                          <div className="checkbox-container">
+                            <span className="checkmark-icon"></span>
+                          </div>
+                          <div className="mission-details">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', width: '100%' }}>
+                              <span className="mission-title">{displayTitle}</span>
+                              {isJustUnlocked && (
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontFamily: 'var(--font-mono)',
+                                  color: 'var(--accent-green)',
+                                  border: '1px solid var(--accent-green)',
+                                  padding: '0 4px',
+                                  marginLeft: '8px',
+                                  textShadow: '0 0 4px rgba(34, 197, 94, 0.4)',
+                                  whiteSpace: 'nowrap'
+                                }}>
+                                  UNLOCKED
+                                </span>
+                              )}
+                            </div>
+                            {briefing && (
+                              <span className="mission-briefing" style={{
+                                display: 'block',
+                                fontSize: '11px',
+                                color: 'var(--text-muted)',
+                                marginTop: '2px',
+                                fontFamily: 'var(--font-mono)'
                               }}>
-                                UNLOCKED
+                                {briefing}
                               </span>
                             )}
-                          </div>
-                          {briefing && (
-                            <span className="mission-briefing" style={{ 
-                              display: 'block', 
-                              fontSize: '11px', 
-                              color: 'var(--text-muted)', 
-                              marginTop: '2px', 
-                              fontFamily: 'var(--font-mono)' 
-                            }}>
-                              {briefing}
-                            </span>
-                          )}
-                          <div className="mission-meta">
-                            <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                            <span className="xp-reward">+{task.xp} XP</span>
+                            <div className="mission-meta">
+                              <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                              <span className="xp-reward">+{task.xp} XP</span>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            );
-          })}
-        </div>
+                      );
+                    })
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     );
   };
 
   const renderSideOps = () => {
+    const activeSuppressedEvent = getActiveMissionsSuppressedEventToday();
     return (
       <section className="side-ops-section">
         <h2 className="panel-title">Side Ops</h2>
         <hr className="section-divider" />
-        <div className="missions-grid">
-          {SIDE_OPS_FIXED_TASKS.map(task => {
-            const isCompleted = dailyState.completedTaskIds.includes(task.id);
-            const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
-            const briefing = flavors[task.id]?.briefing;
-            return (
-              <div 
-                key={task.id} 
-                className={`mission-card ${isCompleted ? 'completed' : ''}`}
-                onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
-              >
-                <div className="checkbox-container">
-                  <span className="checkmark-icon"></span>
-                </div>
-                <div className="mission-details">
-                  <span className="mission-title">{displayTitle}</span>
-                  {briefing && (
-                    <span className="mission-briefing" style={{ 
-                      display: 'block', 
-                      fontSize: '11px', 
-                      color: 'var(--text-muted)', 
-                      marginTop: '2px', 
-                      fontFamily: 'var(--font-mono)' 
-                    }}>
-                      {briefing}
-                    </span>
-                  )}
-                  <div className="mission-meta">
-                    <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
-                    <span className="xp-reward">+{task.xp} XP</span>
+        {activeSuppressedEvent ? (
+          <div className="warning-banner" style={{
+            background: 'rgba(100, 116, 139, 0.05)',
+            border: '1px solid var(--text-muted)',
+            padding: '12px 16px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            color: 'var(--text-muted)',
+            textAlign: 'center'
+          }}>
+            [ EVENT: {activeSuppressedEvent.name.toUpperCase()} — MISSIONS SUSPENDED ]
+          </div>
+        ) : (
+          <div className="missions-grid">
+            {SIDE_OPS_FIXED_TASKS.map(task => {
+              const isCompleted = dailyState.completedTaskIds.includes(task.id);
+              const displayTitle = flavors[task.id]?.title ?? task.name ?? task.title;
+              const briefing = flavors[task.id]?.briefing;
+              return (
+                <div
+                  key={task.id}
+                  className={`mission-card ${isCompleted ? 'completed' : ''}`}
+                  onClick={(e) => handleToggleMission(task.id, task.xp, false, null, null, e)}
+                >
+                  <div className="checkbox-container">
+                    <span className="checkmark-icon"></span>
+                  </div>
+                  <div className="mission-details">
+                    <span className="mission-title">{displayTitle}</span>
+                    {briefing && (
+                      <span className="mission-briefing" style={{
+                        display: 'block',
+                        fontSize: '11px',
+                        color: 'var(--text-muted)',
+                        marginTop: '2px',
+                        fontFamily: 'var(--font-mono)'
+                      }}>
+                        {briefing}
+                      </span>
+                    )}
+                    <div className="mission-meta">
+                      <span className={`badge badge-${task.category.toLowerCase()}`}>{task.category}</span>
+                      <span className="xp-reward">+{task.xp} XP</span>
+                    </div>
                   </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
       </section>
     );
   };
@@ -2923,7 +3266,7 @@ export default function App() {
             const totalTasks = proj.tasks.length;
             const pct = Math.round((progressIdx / totalTasks) * 100);
             const currentTask = progressIdx < totalTasks ? proj.tasks[progressIdx] : null;
-            
+
             let badgeStyle = {
               background: 'rgba(255, 255, 255, 0.03)',
               border: '1px solid rgba(255, 255, 255, 0.15)',
@@ -2966,8 +3309,8 @@ export default function App() {
             }
 
             return (
-              <div 
-                key={proj.id} 
+              <div
+                key={proj.id}
                 className={`project-card ${status === 'ACTIVE' ? 'active-project' : 'queued'}`}
               >
                 <div className="project-status-row" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
@@ -3007,8 +3350,8 @@ export default function App() {
                     Daily Session XP: +{proj.dailyXP}
                   </span>
 
-                  <select 
-                    value={status} 
+                  <select
+                    value={status}
                     onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
                     className="dark-date-picker"
                     style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid var(--border-color)', color: 'var(--accent-amber)' }}
@@ -3026,13 +3369,13 @@ export default function App() {
 
         {doneProjects.length > 0 && (
           <div className="completed-projects-section" style={{ marginTop: '20px' }}>
-            <div 
-              className="panel-title-clickable" 
-              onClick={() => setIsCompletedProjectsExpanded(!isCompletedProjectsExpanded)} 
-              style={{ 
-                cursor: 'pointer', 
-                display: 'flex', 
-                justifyContent: 'space-between', 
+            <div
+              className="panel-title-clickable"
+              onClick={() => setIsCompletedProjectsExpanded(!isCompletedProjectsExpanded)}
+              style={{
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'space-between',
                 alignItems: 'center',
                 userSelect: 'none'
               }}
@@ -3048,8 +3391,8 @@ export default function App() {
                 {doneProjects.map((proj) => {
                   const totalTasks = proj.tasks.length;
                   return (
-                    <div 
-                      key={proj.id} 
+                    <div
+                      key={proj.id}
                       className="project-card done"
                       style={{ border: '1px solid var(--accent-green)', boxShadow: '0 0 10px rgba(34, 197, 94, 0.05)' }}
                     >
@@ -3087,8 +3430,8 @@ export default function App() {
                           Project Complete
                         </span>
 
-                        <select 
-                          value="DONE" 
+                        <select
+                          value="DONE"
                           onChange={(e) => handleChangeProjectStatus(proj.id, e.target.value)}
                           className="dark-date-picker"
                           style={{ fontSize: '11px', padding: '2px 6px', fontFamily: 'var(--font-mono)', height: '24px', background: 'var(--bg-terminal)', border: '1px solid rgba(34, 197, 94, 0.3)', color: 'var(--accent-green)' }}
@@ -3113,23 +3456,23 @@ export default function App() {
   const renderLifeMetrics = () => {
     return (
       <section className="life-metrics-section" style={{ marginTop: '24px', marginBottom: '24px' }}>
-        <div 
-          className="panel-title-clickable" 
-          onClick={() => setIsLifeMetricsExpanded(prev => { const next = !prev; storage.setItem('isLifeMetricsExpanded', String(next)); return next; })} 
-          style={{ 
-            cursor: 'pointer', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+        <div
+          className="panel-title-clickable"
+          onClick={() => setIsLifeMetricsExpanded(prev => { const next = !prev; storage.setItem('isLifeMetricsExpanded', String(next)); return next; })}
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
             userSelect: 'none'
           }}
         >
           <h2 className="panel-title" style={{ margin: 0 }}>📊 LIFE METRICS</h2>
-          <span 
-            className="collapse-arrow" 
-            style={{ 
-              color: 'var(--accent-amber)', 
-              fontFamily: 'var(--font-mono)', 
+          <span
+            className="collapse-arrow"
+            style={{
+              color: 'var(--accent-amber)',
+              fontFamily: 'var(--font-mono)',
               fontSize: '13px',
               letterSpacing: '0.05em'
             }}
@@ -3162,12 +3505,12 @@ export default function App() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div className="metrics-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
                 {metrics.map(metric => (
-                  <div 
-                    key={metric.name} 
-                    className="metric-card" 
-                    style={{ 
-                      background: 'var(--bg-card)', 
-                      border: '1px solid var(--border-color)', 
+                  <div
+                    key={metric.name}
+                    className="metric-card"
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
                       padding: '16px',
                       display: 'flex',
                       flexDirection: 'column',
@@ -3182,11 +3525,11 @@ export default function App() {
                         {metric.pct}%
                       </span>
                     </div>
-                    
+
                     <div className="xp-bar-outer" style={{ height: '8px' }}>
                       <div className="xp-bar-inner" style={{ width: `${metric.pct}%`, transition: 'width 0.6s ease' }}></div>
                     </div>
-                    
+
                     <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                       {metric.label}
                     </span>
@@ -3206,23 +3549,23 @@ export default function App() {
   const renderMissionLogs = () => {
     return (
       <section className="mission-logs-section">
-        <div 
-          className="panel-title-clickable" 
-          onClick={() => setIsLogsExpanded(!isLogsExpanded)} 
-          style={{ 
-            cursor: 'pointer', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+        <div
+          className="panel-title-clickable"
+          onClick={() => setIsLogsExpanded(!isLogsExpanded)}
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
             userSelect: 'none'
           }}
         >
           <h2 className="panel-title" style={{ margin: 0 }}>📊 MISSION LOGS</h2>
-          <span 
-            className="collapse-arrow" 
-            style={{ 
-              color: 'var(--accent-amber)', 
-              fontFamily: 'var(--font-mono)', 
+          <span
+            className="collapse-arrow"
+            style={{
+              color: 'var(--accent-amber)',
+              fontFamily: 'var(--font-mono)',
               fontSize: '13px',
               letterSpacing: '0.05em'
             }}
@@ -3231,19 +3574,19 @@ export default function App() {
           </span>
         </div>
         <hr className="section-divider" />
-        
+
         {isLogsExpanded && (
           <div className="logs-container" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            
+
             {/* Date picker lookup */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
               <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>
                 LOOKUP DATE:
               </span>
-              <input 
-                type="date" 
-                className="dark-date-picker" 
-                value={lookupDate} 
+              <input
+                type="date"
+                className="dark-date-picker"
+                value={lookupDate}
                 onChange={(e) => setLookupDate(e.target.value)}
               />
             </div>
@@ -3252,14 +3595,14 @@ export default function App() {
               const savedLogsRaw = storage.getItem(`log:${lookupDate}`);
               if (!savedLogsRaw) {
                 return (
-                  <div 
-                    className="empty-logs-msg" 
-                    style={{ 
-                      padding: '24px', 
-                      border: '1px dashed var(--border-color)', 
-                      color: 'var(--text-muted)', 
-                      fontFamily: 'var(--font-mono)', 
-                      fontSize: '13px', 
+                  <div
+                    className="empty-logs-msg"
+                    style={{
+                      padding: '24px',
+                      border: '1px dashed var(--border-color)',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '13px',
                       textAlign: 'center',
                       background: 'rgba(0, 0, 0, 0.2)'
                     }}
@@ -3273,14 +3616,14 @@ export default function App() {
                 const dayLogs = JSON.parse(savedLogsRaw);
                 if (!dayLogs || dayLogs.length === 0) {
                   return (
-                    <div 
-                      className="empty-logs-msg" 
-                      style={{ 
-                        padding: '24px', 
-                        border: '1px dashed var(--border-color)', 
-                        color: 'var(--text-muted)', 
-                        fontFamily: 'var(--font-mono)', 
-                        fontSize: '13px', 
+                    <div
+                      className="empty-logs-msg"
+                      style={{
+                        padding: '24px',
+                        border: '1px dashed var(--border-color)',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '13px',
                         textAlign: 'center',
                         background: 'rgba(0, 0, 0, 0.2)'
                       }}
@@ -3292,14 +3635,14 @@ export default function App() {
 
                 if (!Array.isArray(dayLogs)) {
                   return (
-                    <div 
-                      className="empty-logs-msg" 
-                      style={{ 
-                        padding: '24px', 
-                        border: '1px dashed var(--border-color)', 
-                        color: 'var(--text-muted)', 
-                        fontFamily: 'var(--font-mono)', 
-                        fontSize: '13px', 
+                    <div
+                      className="empty-logs-msg"
+                      style={{
+                        padding: '24px',
+                        border: '1px dashed var(--border-color)',
+                        color: 'var(--text-muted)',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '13px',
                         textAlign: 'center',
                         background: 'rgba(0, 0, 0, 0.2)'
                       }}
@@ -3312,60 +3655,60 @@ export default function App() {
                 const completedLogs = dayLogs.filter(l => l && l.type === 'completed');
                 const missedLogs = dayLogs.filter(l => l && l.type === 'missed');
                 const totalXp = completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
-                                missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
+                  missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
 
                 const storedDebrief = storage.getItem(`debrief:${lookupDate}`);
 
                 return (
-                  <div 
-                    className="day-logs-card" 
-                    style={{ 
-                      background: 'var(--bg-card)', 
-                      border: '1px solid var(--border-color)', 
+                  <div
+                    className="day-logs-card"
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
                       padding: '16px',
                       position: 'relative'
                     }}
                   >
-                    <div 
-                      className="day-logs-header" 
-                      style={{ 
-                        display: 'flex', 
-                        justifyContent: 'space-between', 
-                        alignItems: 'center', 
-                        marginBottom: '12px', 
-                        borderBottom: '1px dashed var(--border-color)', 
-                        paddingBottom: '8px' 
+                    <div
+                      className="day-logs-header"
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        marginBottom: '12px',
+                        borderBottom: '1px dashed var(--border-color)',
+                        paddingBottom: '8px'
                       }}
                     >
-                      <span 
-                        className="day-date" 
-                        style={{ 
-                          fontFamily: 'var(--font-mono)', 
-                          fontSize: '14px', 
-                          color: 'var(--accent-amber)', 
-                          fontWeight: 'bold' 
+                      <span
+                        className="day-date"
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '14px',
+                          color: 'var(--accent-amber)',
+                          fontWeight: 'bold'
                         }}
                       >
                         📅 LOG_DATE: {lookupDate}
                       </span>
-                      <span 
-                        className="day-total-xp" 
-                        style={{ 
-                          fontFamily: 'var(--font-mono)', 
-                          fontSize: '13px', 
-                          color: 'var(--accent-green)', 
-                          fontWeight: 'bold' 
+                      <span
+                        className="day-total-xp"
+                        style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '13px',
+                          color: 'var(--accent-green)',
+                          fontWeight: 'bold'
                         }}
                       >
                         +{totalXp} XP EARNED
                       </span>
                     </div>
 
-                    <div 
-                      className="day-logs-list" 
-                      style={{ 
-                        display: 'flex', 
-                        flexDirection: 'column', 
+                    <div
+                      className="day-logs-list"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
                         gap: '8px',
                         marginBottom: '16px'
                       }}
@@ -3373,38 +3716,38 @@ export default function App() {
                       {/* Render Completed Tasks */}
                       {completedLogs.map((log, idx) => {
                         const logTime = new Date(log.completedAt);
-                        const formattedTime = !isNaN(logTime.getTime()) 
+                        const formattedTime = !isNaN(logTime.getTime())
                           ? `${String(logTime.getHours()).padStart(2, '0')}:${String(logTime.getMinutes()).padStart(2, '0')}`
                           : '--:--';
                         return (
-                          <div 
-                            key={`comp-${idx}`} 
-                            className="log-entry-row" 
-                            style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center', 
-                              padding: '6px 10px', 
-                              background: 'rgba(34, 197, 94, 0.02)', 
+                          <div
+                            key={`comp-${idx}`}
+                            className="log-entry-row"
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '6px 10px',
+                              background: 'rgba(34, 197, 94, 0.02)',
                               border: '1px solid rgba(34, 197, 94, 0.1)',
                               borderLeft: '3px solid var(--accent-green)'
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                              <span 
-                                className={`badge badge-${(log.tag || '').toLowerCase()}`} 
-                                style={{ 
-                                  fontSize: '9px', 
+                              <span
+                                className={`badge badge-${(log.tag || '').toLowerCase()}`}
+                                style={{
+                                  fontSize: '9px',
                                   padding: '1px 5px',
                                   whiteSpace: 'nowrap'
                                 }}
                               >
                                 {log.tag}
                               </span>
-                              <span 
-                                className="log-entry-name" 
-                                style={{ 
-                                  fontSize: '13px', 
+                              <span
+                                className="log-entry-name"
+                                style={{
+                                  fontSize: '13px',
                                   color: 'var(--accent-green)',
                                   whiteSpace: 'nowrap',
                                   overflow: 'hidden',
@@ -3415,23 +3758,23 @@ export default function App() {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                              <span 
-                                className="log-entry-xp" 
-                                style={{ 
-                                  color: 'var(--accent-green)', 
-                                  fontFamily: 'var(--font-mono)', 
-                                  fontSize: '12px', 
-                                  fontWeight: 'bold' 
+                              <span
+                                className="log-entry-xp"
+                                style={{
+                                  color: 'var(--accent-green)',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '12px',
+                                  fontWeight: 'bold'
                                 }}
                               >
                                 +{log.xp} XP
                               </span>
-                              <span 
-                                className="log-entry-time" 
-                                style={{ 
-                                  color: 'var(--text-muted)', 
-                                  fontFamily: 'var(--font-mono)', 
-                                  fontSize: '11px' 
+                              <span
+                                className="log-entry-time"
+                                style={{
+                                  color: 'var(--text-muted)',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '11px'
                                 }}
                               >
                                 [{formattedTime}]
@@ -3444,35 +3787,35 @@ export default function App() {
                       {/* Render Missed Fixed Tasks */}
                       {missedLogs.map((log, idx) => {
                         return (
-                          <div 
-                            key={`missed-${idx}`} 
-                            className="log-entry-row" 
-                            style={{ 
-                              display: 'flex', 
-                              justifyContent: 'space-between', 
-                              alignItems: 'center', 
-                              padding: '6px 10px', 
-                              background: 'rgba(255, 111, 97, 0.02)', 
+                          <div
+                            key={`missed-${idx}`}
+                            className="log-entry-row"
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '6px 10px',
+                              background: 'rgba(255, 111, 97, 0.02)',
                               border: '1px solid rgba(255, 111, 97, 0.05)',
                               borderLeft: '3px solid var(--accent-coral)',
                               opacity: 0.6
                             }}
                           >
                             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
-                              <span 
-                                className={`badge badge-${(log.tag || '').toLowerCase()}`} 
-                                style={{ 
-                                  fontSize: '9px', 
+                              <span
+                                className={`badge badge-${(log.tag || '').toLowerCase()}`}
+                                style={{
+                                  fontSize: '9px',
                                   padding: '1px 5px',
                                   whiteSpace: 'nowrap'
                                 }}
                               >
                                 {log.tag}
                               </span>
-                              <span 
-                                className="log-entry-name" 
-                                style={{ 
-                                  fontSize: '13px', 
+                              <span
+                                className="log-entry-name"
+                                style={{
+                                  fontSize: '13px',
                                   color: log.xpPenalty ? 'var(--accent-coral)' : 'var(--text-muted)',
                                   whiteSpace: 'nowrap',
                                   overflow: 'hidden',
@@ -3483,13 +3826,13 @@ export default function App() {
                               </span>
                             </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
-                              <span 
-                                className="log-entry-xp" 
-                                style={{ 
-                                  color: 'var(--accent-coral)', 
-                                  fontFamily: 'var(--font-mono)', 
-                                  fontSize: '11px', 
-                                  fontWeight: 'bold' 
+                              <span
+                                className="log-entry-xp"
+                                style={{
+                                  color: 'var(--accent-coral)',
+                                  fontFamily: 'var(--font-mono)',
+                                  fontSize: '11px',
+                                  fontWeight: 'bold'
                                 }}
                               >
                                 MISSED {log.xpPenalty ? `(${log.xpPenalty} XP)` : ''}
@@ -3502,7 +3845,7 @@ export default function App() {
 
                     {storedDebrief && (
                       <div className="debrief-collapsible" style={{ marginBottom: '16px' }}>
-                        <button 
+                        <button
                           onClick={() => setIsDebriefExpanded(!isDebriefExpanded)}
                           style={{
                             background: 'none',
@@ -3521,7 +3864,7 @@ export default function App() {
                         >
                           <span>{isDebriefExpanded ? '▼' : '►'} COMMANDER'S DEBRIEF</span>
                         </button>
-                        
+
                         {isDebriefExpanded && (
                           <div style={{
                             background: 'rgba(245, 166, 35, 0.02)',
@@ -3541,10 +3884,10 @@ export default function App() {
                     )}
 
                     {/* Stats line */}
-                    <div 
-                      style={{ 
-                        fontFamily: 'var(--font-mono)', 
-                        fontSize: '13px', 
+                    <div
+                      style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '13px',
                         color: 'var(--text-muted)',
                         textAlign: 'right',
                         borderTop: '1px dashed var(--border-color)',
@@ -3559,14 +3902,14 @@ export default function App() {
               } catch (err) {
                 console.error("Failed to parse day logs", err);
                 return (
-                  <div 
-                    className="empty-logs-msg" 
-                    style={{ 
-                      padding: '24px', 
-                      border: '1px dashed var(--border-color)', 
-                      color: 'var(--text-muted)', 
-                      fontFamily: 'var(--font-mono)', 
-                      fontSize: '13px', 
+                  <div
+                    className="empty-logs-msg"
+                    style={{
+                      padding: '24px',
+                      border: '1px dashed var(--border-color)',
+                      color: 'var(--text-muted)',
+                      fontFamily: 'var(--font-mono)',
+                      fontSize: '13px',
                       textAlign: 'center',
                       background: 'rgba(0, 0, 0, 0.2)'
                     }}
@@ -3586,23 +3929,23 @@ export default function App() {
   const renderSkillMap = () => {
     return (
       <section className="skill-map-section">
-        <div 
-          className="panel-title-clickable" 
-          onClick={() => setIsSkillMapExpanded(prev => { const next = !prev; storage.setItem('isSkillMapExpanded', String(next)); return next; })} 
-          style={{ 
-            cursor: 'pointer', 
-            display: 'flex', 
-            justifyContent: 'space-between', 
+        <div
+          className="panel-title-clickable"
+          onClick={() => setIsSkillMapExpanded(prev => { const next = !prev; storage.setItem('isSkillMapExpanded', String(next)); return next; })}
+          style={{
+            cursor: 'pointer',
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
             userSelect: 'none'
           }}
         >
           <h2 className="panel-title" style={{ margin: 0 }}>🗺️ SKILL MAP</h2>
-          <span 
-            className="collapse-arrow" 
-            style={{ 
-              color: 'var(--accent-amber)', 
-              fontFamily: 'var(--font-mono)', 
+          <span
+            className="collapse-arrow"
+            style={{
+              color: 'var(--accent-amber)',
+              fontFamily: 'var(--font-mono)',
               fontSize: '13px',
               letterSpacing: '0.05em'
             }}
@@ -3619,14 +3962,14 @@ export default function App() {
               const completedCount = chainProgress[domain] || 0;
               const totalSteps = chain.length;
               const pct = Math.round((completedCount / totalSteps) * 100);
-              
+
               return (
-                <div 
-                  key={domain} 
-                  className="skill-card" 
-                  style={{ 
-                    background: 'var(--bg-card)', 
-                    border: '1px solid var(--border-color)', 
+                <div
+                  key={domain}
+                  className="skill-card"
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
                     padding: '16px',
                     display: 'flex',
                     flexDirection: 'column',
@@ -3641,7 +3984,7 @@ export default function App() {
                       {completedCount} / {totalSteps} ({pct}%)
                     </span>
                   </div>
-                  
+
                   <div className="xp-bar-outer" style={{ height: '6px' }}>
                     <div className="xp-bar-inner" style={{ width: `${pct}%`, transition: 'width 0.6s ease' }}></div>
                   </div>
@@ -3650,11 +3993,11 @@ export default function App() {
                     {chain.map((step, idx) => {
                       const isCleared = idx < completedCount;
                       return (
-                        <div 
-                          key={idx} 
-                          style={{ 
-                            fontSize: '11px', 
-                            fontFamily: 'var(--font-mono)', 
+                        <div
+                          key={idx}
+                          style={{
+                            fontSize: '11px',
+                            fontFamily: 'var(--font-mono)',
                             display: 'flex',
                             alignItems: 'center',
                             gap: '6px',
@@ -3685,10 +4028,10 @@ export default function App() {
         <section className="character-sheet-section">
           <h2 className="panel-title">Character Sheet</h2>
           <hr className="section-divider" />
-          
+
           <div className="stats-card">
             <div className="stats-grid">
-              
+
               {/* SIGINT */}
               <div className="stat-item">
                 <div className="stat-header">
@@ -3798,22 +4141,46 @@ export default function App() {
   };
 
   const renderFullSchedule = () => {
+    const now = new Date();
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+
     return (
       <div className="schedule-container">
-        {SCHEDULE_BLOCKS.map((block, idx) => {
-          const isActive = activeBlockIndex === idx;
+        {schedule.map((block, idx) => {
+          // Check if this block is active
+          const [startH, startM] = block.start.split(':').map(Number);
+          const [endH, endM] = block.end.split(':').map(Number);
+          const startMinutes = startH * 60 + startM;
+          const endMinutes = endH * 60 + endM;
+
+          let adjustedMinutes = currentMinutes;
+          // Account for after midnight stand-down hours
+          if (currentMinutes < 330) {
+            adjustedMinutes = currentMinutes + 1440;
+          }
+          const blockStartMin = startH * 60 + startM;
+          let blockEndMin = endH * 60 + endM;
+          if (blockEndMin < blockStartMin) {
+            blockEndMin += 1440;
+          }
+
+          const isActive = adjustedMinutes >= blockStartMin && adjustedMinutes < blockEndMin;
+
           return (
-            <div 
-              key={idx} 
-              className={`timeline-block border-${block.category} ${isActive ? 'active-block' : ''}`}
+            <div
+              key={block.id || idx}
+              className={`timeline-block border-${block.type.toLowerCase()} ${isActive ? 'active-block' : ''}`}
             >
-              <div className="timeline-time">{block.time}</div>
+              <div className="timeline-time">{block.start} - {block.end}</div>
               <div className="timeline-details">
                 <div className="timeline-header-group">
-                  <span className="timeline-name">{block.name}</span>
-                  <span className="timeline-desc">{block.desc}</span>
+                  <span className="timeline-name">{block.label}</span>
+                  <span className="timeline-desc">{block.description}</span>
                 </div>
-                <span className="timeline-type-tag">{block.category}</span>
+                <span className="timeline-type-tag" style={{
+                  color: 'var(--accent-amber)',
+                  borderColor: 'var(--accent-amber)'
+                }}>{block.type}</span>
               </div>
             </div>
           );
@@ -3822,67 +4189,1167 @@ export default function App() {
     );
   };
 
+  const renderManagePage = () => {
+    return (
+      <section className="manage-section" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <h2 className="panel-title">✎ OPERATIONAL MANAGEMENT PORTAL</h2>
+        <hr className="section-divider" />
+
+        {/* Tab navigation */}
+        <div className="nav-tabs" style={{ display: 'flex', gap: '10px', marginBottom: '20px' }}>
+          <button
+            onClick={() => setManageTab('fixed')}
+            className={`tab-btn ${manageTab === 'fixed' ? 'active' : ''}`}
+            style={{ flex: 1 }}
+          >
+            FIXED TASKS
+          </button>
+          <button
+            onClick={() => setManageTab('chain')}
+            className={`tab-btn ${manageTab === 'chain' ? 'active' : ''}`}
+            style={{ flex: 1 }}
+          >
+            CHAIN TASKS
+          </button>
+          <button
+            onClick={() => setManageTab('schedule')}
+            className={`tab-btn ${manageTab === 'schedule' ? 'active' : ''}`}
+            style={{ flex: 1 }}
+          >
+            SCHEDULE
+          </button>
+        </div>
+
+        {/* FIXED TASKS TAB */}
+        {manageTab === 'fixed' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Add Fixed Task Form */}
+            <div className="stats-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <h3 style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '15px' }}>[ + ADD NEW FIXED MISSION ]</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TITLE</label>
+                  <input
+                    type="text"
+                    className="dark-date-picker"
+                    value={newFixedTitle}
+                    onChange={(e) => setNewFixedTitle(e.target.value)}
+                    placeholder="Refined title"
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>CATEGORY</label>
+                  <select
+                    className="dark-date-picker"
+                    value={newFixedCategory}
+                    onChange={(e) => setNewFixedCategory(e.target.value)}
+                  >
+                    <option value="DISCIPLINE">DISCIPLINE</option>
+                    <option value="PHYSICAL">PHYSICAL</option>
+                    <option value="SOCIAL">SOCIAL</option>
+                    <option value="OPS">OPS</option>
+                    <option value="COMMS">COMMS</option>
+                    <option value="INTEL">INTEL</option>
+                    <option value="ROADMAP">ROADMAP</option>
+                    <option value="LABS">LABS</option>
+                    <option value="BUILD">BUILD</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>XP REWARD</label>
+                  <input
+                    type="number"
+                    className="dark-date-picker"
+                    value={newFixedXp}
+                    onChange={(e) => setNewFixedXp(parseInt(e.target.value) || 0)}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>RPG STAT</label>
+                  <select
+                    className="dark-date-picker"
+                    value={newFixedStat}
+                    onChange={(e) => setNewFixedStat(e.target.value)}
+                  >
+                    <option value="DISCIPLINE">DISCIPLINE</option>
+                    <option value="ENDURANCE">ENDURANCE</option>
+                    <option value="OPS">OPS</option>
+                    <option value="COMMS">COMMS</option>
+                    <option value="SIGINT">SIGINT</option>
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!newFixedTitle) return;
+                  const newId = `fixed:custom_${Date.now()}`;
+                  const newTask = {
+                    id: newId,
+                    title: newFixedTitle,
+                    category: newFixedCategory,
+                    xp: newFixedXp,
+                    stat: newFixedStat,
+                    bonus: Math.ceil(newFixedXp * 0.1)
+                  };
+                  updateFixedTasksList([...customFixedTasks, newTask], deletedTaskIds);
+                  setNewFixedTitle('');
+                }}
+                className="end-shift-btn"
+                style={{ alignSelf: 'flex-start', marginTop: '8px', padding: '6px 16px', border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }}
+              >
+                [ + ADD TASK ]
+              </button>
+            </div>
+
+            {/* List of current tasks */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>ACTIVE MISSIONS</h3>
+              {fixedTasks.map(task => (
+                <div
+                  key={task.id}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="text"
+                      className="dark-date-picker"
+                      style={{ flex: 1, minWidth: '200px' }}
+                      value={task.title}
+                      onChange={(e) => {
+                        const updated = customFixedTasks.map(c => c.id === task.id ? { ...c, title: e.target.value } : c);
+                        if (!customFixedTasks.some(c => c.id === task.id)) {
+                          updated.push({ ...task, title: e.target.value });
+                        }
+                        updateFixedTasksList(updated, deletedTaskIds);
+                      }}
+                    />
+                    <select
+                      className="dark-date-picker"
+                      value={task.category}
+                      onChange={(e) => {
+                        const updated = customFixedTasks.map(c => c.id === task.id ? { ...c, category: e.target.value } : c);
+                        if (!customFixedTasks.some(c => c.id === task.id)) {
+                          updated.push({ ...task, category: e.target.value });
+                        }
+                        updateFixedTasksList(updated, deletedTaskIds);
+                      }}
+                    >
+                      <option value="DISCIPLINE">DISCIPLINE</option>
+                      <option value="PHYSICAL">PHYSICAL</option>
+                      <option value="SOCIAL">SOCIAL</option>
+                      <option value="OPS">OPS</option>
+                      <option value="COMMS">COMMS</option>
+                      <option value="INTEL">INTEL</option>
+                      <option value="ROADMAP">ROADMAP</option>
+                      <option value="LABS">LABS</option>
+                      <option value="BUILD">BUILD</option>
+                    </select>
+                    <input
+                      type="number"
+                      className="dark-date-picker"
+                      style={{ width: '80px' }}
+                      value={task.xp}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value) || 0;
+                        const updated = customFixedTasks.map(c => c.id === task.id ? { ...c, xp: val } : c);
+                        if (!customFixedTasks.some(c => c.id === task.id)) {
+                          updated.push({ ...task, xp: val });
+                        }
+                        updateFixedTasksList(updated, deletedTaskIds);
+                      }}
+                    />
+                    <button
+                      onClick={() => {
+                        const nextDeleted = [...deletedTaskIds, task.id];
+                        const nextCustom = customFixedTasks.filter(c => c.id !== task.id);
+                        updateFixedTasksList(nextCustom, nextDeleted);
+                      }}
+                      className="end-shift-btn"
+                      style={{ border: '1px solid var(--accent-coral)', color: 'var(--accent-coral)', padding: '4px 12px' }}
+                    >
+                      [ DELETE ]
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* CHAIN TASKS TAB */}
+        {manageTab === 'chain' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Create New Chain */}
+            <div className="stats-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <h3 style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '15px' }}>[ + CREATE NEW PROGRESSIVE PATH ]</h3>
+              <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+                <input
+                  type="text"
+                  className="dark-date-picker"
+                  placeholder="New Chain Name (e.g. AUDITING)"
+                  value={newChainName}
+                  onChange={(e) => setNewChainName(e.target.value.toUpperCase())}
+                  style={{ flex: 1 }}
+                />
+                <button
+                  onClick={() => {
+                    if (!newChainName || chains[newChainName]) return;
+                    const cloned = { ...chains };
+                    cloned[newChainName] = [{ title: 'Initial Step Name', category: 'ROADMAP', xp: 50 }];
+                    saveCustomChains(cloned);
+                    setSelectedManageChain(newChainName);
+                    setNewChainName('');
+                  }}
+                  className="end-shift-btn"
+                  style={{ border: '1px solid var(--accent-green)', color: 'var(--accent-green)', padding: '6px 16px' }}
+                >
+                  [ CREATE ]
+                </button>
+              </div>
+            </div>
+
+            {/* Select Chain to View */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>SELECT PATH:</span>
+              <select
+                className="dark-date-picker"
+                value={selectedManageChain}
+                onChange={(e) => setSelectedManageChain(e.target.value)}
+              >
+                {Object.keys(chains).map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Steps List */}
+            {chains[selectedManageChain] && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>STEPS FOR {selectedManageChain}</h3>
+                  <button
+                    onClick={() => {
+                      const cloned = { ...chains };
+                      cloned[selectedManageChain] = [
+                        ...cloned[selectedManageChain],
+                        { title: 'New Step Name', category: 'ROADMAP', xp: 50 }
+                      ];
+                      saveCustomChains(cloned);
+                    }}
+                    className="end-shift-btn"
+                    style={{ border: '1px solid var(--accent-green)', color: 'var(--accent-green)', padding: '4px 12px' }}
+                  >
+                    [ + ADD STEP TO END ]
+                  </button>
+                </div>
+
+                {chains[selectedManageChain].map((step, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      background: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
+                      padding: '12px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', width: '30px' }}>#{idx + 1}</span>
+                      <input
+                        type="text"
+                        className="dark-date-picker"
+                        style={{ flex: 1 }}
+                        value={step.title}
+                        onChange={(e) => {
+                          const cloned = { ...chains };
+                          cloned[selectedManageChain][idx].title = e.target.value;
+                          saveCustomChains(cloned);
+                        }}
+                      />
+                      <input
+                        type="number"
+                        className="dark-date-picker"
+                        style={{ width: '80px' }}
+                        value={step.xp}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value) || 0;
+                          const cloned = { ...chains };
+                          cloned[selectedManageChain][idx].xp = val;
+                          saveCustomChains(cloned);
+                        }}
+                      />
+                      <button
+                        onClick={() => {
+                          const cloned = { ...chains };
+                          cloned[selectedManageChain].splice(idx, 0, {
+                            title: 'Inserted Step Name',
+                            category: 'ROADMAP',
+                            xp: 50
+                          });
+                          saveCustomChains(cloned);
+                        }}
+                        className="end-shift-btn"
+                        style={{ border: '1px solid var(--accent-teal)', color: 'var(--accent-teal)', padding: '4px 8px', fontSize: '11px' }}
+                      >
+                        [ INS ]
+                      </button>
+                      <button
+                        onClick={() => {
+                          const cloned = { ...chains };
+                          cloned[selectedManageChain].splice(idx, 1);
+                          saveCustomChains(cloned);
+                        }}
+                        className="end-shift-btn"
+                        style={{ border: '1px solid var(--accent-coral)', color: 'var(--accent-coral)', padding: '4px 8px', fontSize: '11px' }}
+                        disabled={chains[selectedManageChain].length <= 1}
+                      >
+                        [ DEL ]
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* SCHEDULE TAB */}
+        {manageTab === 'schedule' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            {/* Insert Schedule Block */}
+            <div className="stats-card" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <h3 style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '15px' }}>[ + INSERT TIME TIMELINE BLOCK ]</h3>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>START TIME</label>
+                  <input
+                    type="time"
+                    className="dark-date-picker"
+                    value={newSchedStart}
+                    onChange={(e) => setNewSchedStart(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>END TIME</label>
+                  <input
+                    type="time"
+                    className="dark-date-picker"
+                    value={newSchedEnd}
+                    onChange={(e) => setNewSchedEnd(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>LABEL</label>
+                  <input
+                    type="text"
+                    className="dark-date-picker"
+                    placeholder="Deep work"
+                    value={newSchedLabel}
+                    onChange={(e) => setNewSchedLabel(e.target.value)}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>TYPE Tag</label>
+                  <select
+                    className="dark-date-picker"
+                    value={newSchedType}
+                    onChange={(e) => setNewSchedType(e.target.value)}
+                  >
+                    <option value="ROADMAP">ROADMAP</option>
+                    <option value="BUILD">BUILD</option>
+                    <option value="PHYSICAL">PHYSICAL</option>
+                    <option value="DISCIPLINE">DISCIPLINE</option>
+                    <option value="OPS">OPS</option>
+                    <option value="LABS">LABS</option>
+                    <option value="SOCIAL">SOCIAL</option>
+                    <option value="INTEL">INTEL</option>
+                    <option value="REST">REST</option>
+                  </select>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', gridColumn: 'span 2' }}>
+                  <label style={{ fontSize: '11px', color: 'var(--text-muted)' }}>DESCRIPTION</label>
+                  <input
+                    type="text"
+                    className="dark-date-picker"
+                    placeholder="TryHackMe / PortSwigger sessions"
+                    value={newSchedDesc}
+                    onChange={(e) => setNewSchedDesc(e.target.value)}
+                  />
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (!newSchedLabel || !newSchedStart || !newSchedEnd) return;
+                  const newBlock = {
+                    id: `sched_${Date.now()}`,
+                    label: newSchedLabel,
+                    start: newSchedStart,
+                    end: newSchedEnd,
+                    type: newSchedType,
+                    description: newSchedDesc
+                  };
+                  saveCustomSchedule([...schedule, newBlock]);
+                  setNewSchedLabel('');
+                  setNewSchedDesc('');
+                }}
+                className="end-shift-btn"
+                style={{ alignSelf: 'flex-start', marginTop: '8px', padding: '6px 16px', border: '1px solid var(--accent-green)', color: 'var(--accent-green)' }}
+              >
+                [ + INSERT BLOCK ]
+              </button>
+            </div>
+
+            {/* List of current schedule blocks */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+              <h3 style={{ fontFamily: 'var(--font-mono)', fontSize: '14px', color: 'var(--text-muted)' }}>CURRENT CHRONOLOGICAL BLOCKS</h3>
+              {schedule.map((block, idx) => (
+                <div
+                  key={block.id || idx}
+                  style={{
+                    background: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    padding: '12px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '10px'
+                  }}
+                >
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    <input
+                      type="time"
+                      className="dark-date-picker"
+                      style={{ width: '100px' }}
+                      value={block.start}
+                      onChange={(e) => {
+                        const cloned = schedule.map(s => (s.id === block.id || (!s.id && schedule.indexOf(s) === idx)) ? { ...s, start: e.target.value } : s);
+                        saveCustomSchedule(cloned);
+                      }}
+                    />
+                    <span style={{ color: 'var(--text-muted)' }}>TO</span>
+                    <input
+                      type="time"
+                      className="dark-date-picker"
+                      style={{ width: '100px' }}
+                      value={block.end}
+                      onChange={(e) => {
+                        const cloned = schedule.map(s => (s.id === block.id || (!s.id && schedule.indexOf(s) === idx)) ? { ...s, end: e.target.value } : s);
+                        saveCustomSchedule(cloned);
+                      }}
+                    />
+                    <input
+                      type="text"
+                      className="dark-date-picker"
+                      style={{ flex: 1, minWidth: '150px' }}
+                      value={block.label}
+                      onChange={(e) => {
+                        const cloned = schedule.map(s => (s.id === block.id || (!s.id && schedule.indexOf(s) === idx)) ? { ...s, label: e.target.value } : s);
+                        saveCustomSchedule(cloned);
+                      }}
+                    />
+                    <select
+                      className="dark-date-picker"
+                      value={block.type}
+                      onChange={(e) => {
+                        const cloned = schedule.map(s => (s.id === block.id || (!s.id && schedule.indexOf(s) === idx)) ? { ...s, type: e.target.value } : s);
+                        saveCustomSchedule(cloned);
+                      }}
+                    >
+                      <option value="ROADMAP">ROADMAP</option>
+                      <option value="BUILD">BUILD</option>
+                      <option value="PHYSICAL">PHYSICAL</option>
+                      <option value="DISCIPLINE">DISCIPLINE</option>
+                      <option value="OPS">OPS</option>
+                      <option value="LABS">LABS</option>
+                      <option value="SOCIAL">SOCIAL</option>
+                      <option value="INTEL">INTEL</option>
+                      <option value="REST">REST</option>
+                    </select>
+                    <button
+                      onClick={() => {
+                        const cloned = schedule.filter(s => !(s.id === block.id || (!s.id && schedule.indexOf(s) === idx)));
+                        saveCustomSchedule(cloned);
+                      }}
+                      className="end-shift-btn"
+                      style={{ border: '1px solid var(--accent-coral)', color: 'var(--accent-coral)', padding: '4px 12px' }}
+                      disabled={schedule.length <= 1}
+                    >
+                      [ DELETE ]
+                    </button>
+                  </div>
+                  <input
+                    type="text"
+                    className="dark-date-picker"
+                    style={{ width: '100%' }}
+                    placeholder="Description"
+                    value={block.description}
+                    onChange={(e) => {
+                      const cloned = schedule.map(s => (s.id === block.id || (!s.id && schedule.indexOf(s) === idx)) ? { ...s, description: e.target.value } : s);
+                      saveCustomSchedule(cloned);
+                    }}
+                  />
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
+    );
+  };
+
+  const getCalendarDays = (date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+
+    const firstDayOfMonth = new Date(year, month, 1);
+    const startDayOfWeek = firstDayOfMonth.getDay();
+    const offset = startDayOfWeek === 0 ? 6 : startDayOfWeek - 1;
+
+    const days = [];
+
+    const prevMonthLastDay = new Date(year, month, 0).getDate();
+    for (let i = offset - 1; i >= 0; i--) {
+      const d = new Date(year, month - 1, prevMonthLastDay - i);
+      days.push({ date: d, isCurrentMonth: false });
+    }
+
+    const lastDayOfMonth = new Date(year, month + 1, 0).getDate();
+    for (let i = 1; i <= lastDayOfMonth; i++) {
+      const d = new Date(year, month, i);
+      days.push({ date: d, isCurrentMonth: true });
+    }
+
+    const totalCells = Math.ceil(days.length / 7) * 7;
+    const paddingCells = totalCells - days.length;
+    for (let i = 1; i <= paddingCells; i++) {
+      const d = new Date(year, month + 1, i);
+      days.push({ date: d, isCurrentMonth: false });
+    }
+
+    return days;
+  };
+
+  const getXpForDate = (dateStr) => {
+    const raw = storage.getItem(`log:${dateStr}`);
+    if (!raw) return 0;
+    try {
+      const logs = JSON.parse(raw);
+      if (!Array.isArray(logs)) return 0;
+      const completedLogs = logs.filter(l => l && l.type === 'completed');
+      const missedLogs = logs.filter(l => l && l.type === 'missed');
+      return completedLogs.reduce((sum, log) => sum + (log.xp || 0), 0) +
+        missedLogs.reduce((sum, log) => sum + (log.xpPenalty || 0), 0);
+    } catch {
+      return 0;
+    }
+  };
+
+  const getEventsForDate = (dateStr) => {
+    return events.filter(evt => dateStr >= evt.startDate && dateStr <= evt.endDate);
+  };
+
+  const handleSaveEvent = () => {
+    if (!eventName || !eventStartDate || !eventEndDate) return;
+
+    let updatedEvents = [...events];
+    if (editingEventId) {
+      updatedEvents = updatedEvents.map(evt => {
+        if (evt.id === editingEventId) {
+          return {
+            ...evt,
+            name: eventName,
+            startDate: eventStartDate,
+            endDate: eventEndDate,
+            missionsActive: eventMissionsActive,
+            color: eventColor
+          };
+        }
+        return evt;
+      });
+    } else {
+      updatedEvents.push({
+        id: `evt-${Date.now()}`,
+        name: eventName,
+        startDate: eventStartDate,
+        endDate: eventEndDate,
+        missionsActive: eventMissionsActive,
+        color: eventColor
+      });
+    }
+
+    setEvents(updatedEvents);
+    storage.setItem('events', JSON.stringify(updatedEvents));
+    setShowEventModal(false);
+  };
+
+  const handleDeleteEvent = () => {
+    if (!editingEventId) return;
+    const updatedEvents = events.filter(evt => evt.id !== editingEventId);
+    setEvents(updatedEvents);
+    storage.setItem('events', JSON.stringify(updatedEvents));
+    setShowEventModal(false);
+  };
+
+  const upcomingEvents = useMemo(() => {
+    const today = getTodayString();
+    const activeOrFuture = events.filter(evt => evt.endDate >= today);
+    activeOrFuture.sort((a, b) => a.startDate.localeCompare(b.startDate));
+    return activeOrFuture.slice(0, 3);
+  }, [events]);
+
+  const renderUpcomingEventsWidget = () => {
+    if (upcomingEvents.length === 0) return null;
+    return (
+      <section className="upcoming-events-section" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <h2 className="panel-title">Upcoming Events</h2>
+        <hr className="section-divider" />
+        <div style={{
+          display: 'flex',
+          flexDirection: 'row',
+          flexWrap: 'wrap',
+          gap: '12px'
+        }}>
+          {upcomingEvents.map(evt => {
+            let colorVar = 'var(--accent-amber)';
+            if (evt.color === 'red') colorVar = 'var(--accent-coral)';
+            else if (evt.color === 'green') colorVar = 'var(--accent-green)';
+            else if (evt.color === 'blue') colorVar = 'var(--accent-blue)';
+
+            return (
+              <div
+                key={evt.id}
+                style={{
+                  background: 'var(--bg-card)',
+                  border: `1px solid ${colorVar}`,
+                  padding: '8px 12px',
+                  borderRadius: '2px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '13px',
+                  flex: '1 1 calc(33.33% - 12px)',
+                  minWidth: '200px'
+                }}
+              >
+                <div style={{
+                  width: '10px',
+                  height: '10px',
+                  borderRadius: '50%',
+                  background: colorVar
+                }}></div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                  <span style={{ fontWeight: 'bold', color: 'var(--text-main)' }}>{evt.name}</span>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{evt.startDate} to {evt.endDate}</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+    );
+  };
+
+  const getActiveMissionsSuppressedEventToday = () => {
+    const today = getTodayString();
+    if (storage.getItem(`holiday:${today}`) !== null) return null;
+    return events.find(evt => evt.missionsActive === false && today >= evt.startDate && today <= evt.endDate);
+  };
+
+  const renderCalendar = () => {
+    const year = calendarDate.getFullYear();
+    const month = calendarDate.getMonth();
+    const monthName = calendarDate.toLocaleString('default', { month: 'long' }).toUpperCase();
+
+    const days = getCalendarDays(calendarDate);
+    const weekdays = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+
+    const handlePrevMonth = () => {
+      setCalendarDate(new Date(year, month - 1, 1));
+    };
+
+    const handleNextMonth = () => {
+      setCalendarDate(new Date(year, month + 1, 1));
+    };
+
+    return (
+      <section className="calendar-section" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h2 className="panel-title">📅 OPERATIONAL CALENDAR // {monthName} {year}</h2>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => {
+                setEditingEventId(null);
+                setEventName('');
+                setEventStartDate(getTodayString());
+                setEventEndDate(getTodayString());
+                setEventMissionsActive(true);
+                setEventColor('amber');
+                setShowEventModal(true);
+              }}
+              className="end-shift-btn"
+              style={{
+                background: 'var(--bg-terminal)',
+                border: '1px solid var(--accent-green)',
+                color: 'var(--accent-green)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+                fontWeight: 'bold',
+                padding: '4px 12px',
+                cursor: 'pointer',
+                boxShadow: '0 0 5px rgba(34, 197, 94, 0.2)',
+                textTransform: 'uppercase'
+              }}
+            >
+              [ + ADD EVENT ]
+            </button>
+            <button
+              onClick={handlePrevMonth}
+              className="end-shift-btn"
+              style={{
+                background: 'var(--bg-terminal)',
+                border: '1px solid var(--accent-amber)',
+                color: 'var(--accent-amber)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+                padding: '4px 12px',
+                cursor: 'pointer'
+              }}
+            >
+              &lt; PREV
+            </button>
+            <button
+              onClick={handleNextMonth}
+              className="end-shift-btn"
+              style={{
+                background: 'var(--bg-terminal)',
+                border: '1px solid var(--accent-amber)',
+                color: 'var(--accent-amber)',
+                fontFamily: 'var(--font-mono)',
+                fontSize: '12px',
+                padding: '4px 12px',
+                cursor: 'pointer'
+              }}
+            >
+              NEXT &gt;
+            </button>
+          </div>
+        </div>
+        <hr className="section-divider" />
+
+        <div style={{
+          background: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
+          padding: '16px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px'
+        }}>
+          {/* Weekday headers */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gap: '8px',
+            textAlign: 'center',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '12px',
+            color: 'var(--text-muted)',
+            fontWeight: 'bold',
+            borderBottom: '1px solid var(--border-color)',
+            paddingBottom: '8px'
+          }}>
+            {weekdays.map(day => <div key={day}>{day}</div>)}
+          </div>
+
+          {/* Days grid */}
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(7, 1fr)',
+            gridAutoRows: 'minmax(90px, auto)',
+            gap: '8px'
+          }}>
+            {days.map(({ date, isCurrentMonth }, idx) => {
+              const dateStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+              const isToday = dateStr === getTodayString();
+              const isHoliday = storage.getItem(`holiday:${dateStr}`) !== null;
+              const dayXp = getXpForDate(dateStr);
+
+              const dateEvents = getEventsForDate(dateStr);
+              const hasRedEvent = dateEvents.some(e => e.color === 'red');
+              const hasBlueEvent = dateEvents.some(e => e.color === 'blue');
+
+              let borderStyle = '1px solid var(--border-color)';
+              if (isToday) {
+                borderStyle = '2px solid var(--accent-amber)';
+              }
+
+              const isFuture = date > new Date();
+              const isPast = date < new Date() && !isToday;
+
+              let cellBg = 'rgba(0, 0, 0, 0.2)';
+              let dateColor = 'var(--text-main)';
+
+              if (!isCurrentMonth) {
+                cellBg = 'rgba(0, 0, 0, 0.4)';
+                dateColor = 'var(--text-muted)';
+              } else if (isHoliday) {
+                cellBg = 'rgba(156, 163, 175, 0.15)'; // Grey holiday tint
+              } else if (hasRedEvent) {
+                cellBg = 'rgba(239, 68, 68, 0.12)'; // Red exam tint
+              } else if (hasBlueEvent) {
+                cellBg = 'rgba(59, 130, 246, 0.12)'; // Blue trip tint
+              } else if (isFuture) {
+                dateColor = 'var(--text-muted)';
+              } else if (isPast && dayXp === 0) {
+                cellBg = 'rgba(255, 111, 97, 0.05)';
+                borderStyle = '1px solid rgba(255, 111, 97, 0.2)';
+              }
+
+              return (
+                <div
+                  key={idx}
+                  className="calendar-day-cell"
+                  style={{
+                    background: cellBg,
+                    border: borderStyle,
+                    padding: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    justifyContent: 'space-between',
+                    minHeight: '90px',
+                    boxShadow: isToday ? '0 0 10px var(--accent-amber-glow)' : 'none',
+                    position: 'relative',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    setEditingEventId(null);
+                    setEventName('');
+                    setEventStartDate(dateStr);
+                    setEventEndDate(dateStr);
+                    setEventMissionsActive(true);
+                    setEventColor('amber');
+                    setShowEventModal(true);
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+                      <span style={{
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '13px',
+                        fontWeight: 'bold',
+                        color: dateColor
+                      }}>
+                        {date.getDate()}
+                      </span>
+                      {/* Event Color Dots row */}
+                      <div className="event-dots-row" style={{ display: 'flex', gap: '3px', marginTop: '2px' }}>
+                        {isHoliday && (
+                          <span
+                            title="Holiday"
+                            style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#9ca3af', display: 'inline-block' }}
+                          />
+                        )}
+                        {dateEvents.map(evt => {
+                          let dotColor = '#f5a623'; // Amber
+                          if (evt.color === 'red') dotColor = '#ef4444'; // Red
+                          else if (evt.color === 'blue') dotColor = '#3b82f6'; // Blue
+                          else if (evt.color === 'green') dotColor = '#10b981'; // Green
+                          return (
+                            <span
+                              key={evt.id}
+                              title={evt.name}
+                              style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: dotColor, display: 'inline-block' }}
+                            />
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                      {isHoliday && (
+                        <span style={{
+                          background: '#9ca3af',
+                          color: 'var(--bg-terminal)',
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '8px',
+                          fontWeight: 'bold',
+                          padding: '0px 3px',
+                          borderRadius: '1px'
+                        }}>
+                          H
+                        </span>
+                      )}
+
+                      {dayXp > 0 && (
+                        <span style={{
+                          fontFamily: 'var(--font-mono)',
+                          fontSize: '11px',
+                          color: 'rgba(34, 197, 94, 0.8)',
+                          fontWeight: 'bold'
+                        }}>
+                          +{dayXp}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                    marginTop: '8px'
+                  }}>
+                    {dateEvents.map(evt => {
+                      let tagColor = 'var(--accent-amber)';
+                      let tagBg = 'var(--accent-amber-dim)';
+                      if (evt.color === 'red') {
+                        tagColor = 'var(--accent-coral)';
+                        tagBg = 'rgba(255, 111, 97, 0.15)';
+                      } else if (evt.color === 'green') {
+                        tagColor = 'var(--accent-green)';
+                        tagBg = 'var(--accent-green-dim)';
+                      } else if (evt.color === 'blue') {
+                        tagColor = 'var(--accent-blue)';
+                        tagBg = 'var(--accent-blue-dim)';
+                      }
+
+                      return (
+                        <div
+                          key={evt.id}
+                          style={{
+                            background: tagBg,
+                            border: `1px solid ${tagColor}`,
+                            color: tagColor,
+                            fontSize: '9px',
+                            fontFamily: 'var(--font-mono)',
+                            padding: '1px 4px',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            textAlign: 'center',
+                            fontWeight: 'bold'
+                          }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingEventId(evt.id);
+                            setEventName(evt.name);
+                            setEventStartDate(evt.startDate);
+                            setEventEndDate(evt.endDate);
+                            setEventMissionsActive(evt.missionsActive);
+                            setEventColor(evt.color);
+                            setShowEventModal(true);
+                          }}
+                        >
+                          {evt.name}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+    );
+  };
+
+  if (isInitialLoading) {
+    return (
+      <div className="login-overlay">
+        <div className="login-box" style={{ maxWidth: '380px', textAlign: 'center' }}>
+          <div className="login-title" style={{ justifyContent: 'center', marginBottom: '16px' }}>
+            <span className="pulse-dot"></span>
+            INITIALISING TAC-NET...
+          </div>
+          <div className="login-logs">
+            <span className="login-log-line">Establishing secure pipeline...</span>
+            <span className="login-log-line">Loading remote telemetry...</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <div className="login-overlay">
+        <form className="login-box" onSubmit={handleLogin}>
+          <div className="login-title-bar">
+            <div className="login-title">
+              <span className="pulse-dot"></span>
+              SYSTEM SECURITY CONTROL
+            </div>
+          </div>
+
+          <div className="login-logs">
+            <span className="login-log-line">[!] WARNING: ACCESS RESTRICTED TO AUTHORIZED OPERATORS ONLY</span>
+            <span className="login-log-line">[!] TARGET HOST: OPERATOR TERMINAL // DEEP GRID</span>
+            <span className="login-log-line">[!] ENTER MASTER PASSCODE TO DECRYPT INTERFACE</span>
+          </div>
+
+          <div className="login-input-group">
+            <label className="login-input-label">Authorization Token</label>
+            <div className="login-input-wrapper">
+              <span className="login-prompt-arrow">PASSCODE&gt;</span>
+              <input
+                type="password"
+                className="login-input"
+                value={passcode}
+                onChange={(e) => setPasscode(e.target.value)}
+                required
+                autoFocus
+              />
+            </div>
+          </div>
+
+          <button className="login-btn" type="submit" disabled={authLoading}>
+            {authLoading ? 'Verifying...' : 'Authorize Operator'}
+          </button>
+
+          {authError && (
+            <div className="login-error">
+              <span>[!] ERROR: {authError}</span>
+            </div>
+          )}
+        </form>
+      </div>
+    );
+  }
+
   return (
     <div className="layout-wrapper">
       {/* LEFT SIDEBAR NAVIGATION */}
       <aside className="sidebar">
         <div className="sidebar-title">TAC-NET</div>
         <nav className="sidebar-menu">
-          <div 
-            className={`sidebar-link ${activePage === 'home' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'home' ? 'active' : ''}`}
             onClick={() => setActivePage('home')}
           >
             <span>🏠</span> HOME
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'missions' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'calendar' ? 'active' : ''}`}
+            onClick={() => setActivePage('calendar')}
+          >
+            <span>📅</span> CALENDAR
+          </div>
+          <div
+            className={`sidebar-link ${activePage === 'missions' ? 'active' : ''}`}
             onClick={() => setActivePage('missions')}
           >
             <span>⚔️</span> MISSIONS
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'projects' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'projects' ? 'active' : ''}`}
             onClick={() => setActivePage('projects')}
           >
             <span>📁</span> PROJECTS
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'schedule' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'schedule' ? 'active' : ''}`}
             onClick={() => setActivePage('schedule')}
           >
             <span>📅</span> SCHEDULE
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'skillmap' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'skillmap' ? 'active' : ''}`}
             onClick={() => setActivePage('skillmap')}
           >
             <span>🗺️</span> SKILL MAP
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'character' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'character' ? 'active' : ''}`}
             onClick={() => setActivePage('character')}
           >
             <span>👤</span> CHARACTER
           </div>
-          <div 
-            className={`sidebar-link ${activePage === 'logs' ? 'active' : ''}`} 
+          <div
+            className={`sidebar-link ${activePage === 'logs' ? 'active' : ''}`}
             onClick={() => setActivePage('logs')}
           >
             <span>📊</span> LOGS
+          </div>
+          <div
+            className={`sidebar-link ${activePage === 'manage' ? 'active' : ''}`}
+            onClick={() => setActivePage('manage')}
+          >
+            <span>✎</span> MANAGE
           </div>
         </nav>
       </aside>
 
       {/* MAIN CONTENT AREA */}
       <main className="main-content">
-        {/* GLOBAL HEADER */}
-        <header className="global-header" style={{ marginBottom: '20px' }}>
+        {/* GLOBAL HEADER (DESKTOP) */}
+        <header className="global-header desktop-header" style={{ marginBottom: '20px' }}>
           <div className="header-operator-info" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span className="operator-role" style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '13px', fontWeight: 'bold' }}>
               OPERATOR TERMINAL // DEEP GRID
             </span>
             <div className="header-stats-row" style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-              <button 
+              {isTodayHoliday ? (
+                <button
+                  disabled
+                  className="end-shift-btn"
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ HOLIDAY MARKED ]
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setHolidayDate(getTodayString());
+                    setHolidayReason('');
+                    setShowHolidayModal(true);
+                  }}
+                  className="end-shift-btn"
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--accent-amber)',
+                    color: 'var(--accent-amber)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                    transition: 'all 0.2s',
+                    textTransform: 'uppercase'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--accent-amber)';
+                    e.currentTarget.style.color = 'var(--bg-terminal)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'var(--bg-terminal)';
+                    e.currentTarget.style.color = 'var(--accent-amber)';
+                  }}
+                >
+                  [ MARK HOLIDAY ]
+                </button>
+              )}
+              <button
                 onClick={handleEndShift}
                 className="end-shift-btn"
                 style={{
@@ -3927,6 +5394,132 @@ export default function App() {
           </div>
         </header>
 
+        {/* GLOBAL HEADER (MOBILE) */}
+        <header className="global-header mobile-only-header" style={{ marginBottom: '20px' }}>
+          <div className="mobile-header-row-1" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span className="operator-role" style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent-amber)', fontSize: '13px', fontWeight: 'bold' }}>
+              OPERATOR // DEEP GRID
+            </span>
+            <span className="online-badge" style={{
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid var(--accent-green)',
+              color: 'var(--accent-green)',
+              fontFamily: 'var(--font-mono)',
+              fontSize: '11px',
+              fontWeight: 'bold',
+              padding: '2px 8px',
+              borderRadius: '2px',
+              boxShadow: '0 0 5px rgba(34, 197, 94, 0.2)'
+            }}>
+              [ ONLINE ]
+            </span>
+          </div>
+          <div className="mobile-header-row-2" style={{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="mobile-header-stats" style={{ display: 'flex', gap: '10px', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                <span className="streak-badge" style={{ fontFamily: 'var(--font-mono)', fontSize: '11px', color: 'var(--accent-orange)' }}>
+                  🔥 {profile.streak} DAYS
+                </span>
+                <span className="level-badge" style={{ background: 'var(--accent-amber-dim)', border: '1px solid var(--accent-amber)', color: 'var(--accent-amber)', fontFamily: 'var(--font-mono)', fontSize: '10px', fontWeight: 'bold', padding: '1px 6px' }}>
+                  LVL {levelProgress.level}
+                </span>
+              </div>
+              {isTodayHoliday ? (
+                <button
+                  disabled
+                  className="end-shift-btn"
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    opacity: 0.5,
+                    cursor: 'not-allowed',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ HOLIDAY MARKED ]
+                </button>
+              ) : (
+                <button
+                  onClick={() => {
+                    setHolidayDate(getTodayString());
+                    setHolidayReason('');
+                    setShowHolidayModal(true);
+                  }}
+                  className="end-shift-btn"
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--accent-amber)',
+                    color: 'var(--accent-amber)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '10px',
+                    fontWeight: 'bold',
+                    padding: '2px 8px',
+                    cursor: 'pointer',
+                    boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ HOLIDAY ]
+                </button>
+              )}
+            </div>
+            <div className="xp-progress-container" style={{ marginTop: '2px' }}>
+              <div className="xp-bar-outer" style={{ height: '6px' }}>
+                <div className="xp-bar-inner" style={{ width: `${levelProgress.pct}%`, transition: 'width 0.6s ease' }}></div>
+              </div>
+              <div className="xp-numbers" style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '10px', color: 'var(--text-muted)', marginTop: '4px' }}>
+                {levelProgress.xpInLevel} / 200 XP
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* HOLIDAY BANNER */}
+        {isTodayHoliday && (
+          <div className="warning-banner" style={{
+            background: 'var(--accent-amber-dim)',
+            border: '1px solid var(--accent-amber)',
+            padding: '12px 16px',
+            marginBottom: '20px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: '13px',
+            color: 'var(--accent-amber)',
+            position: 'relative'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>[ TODAY MARKED AS HOLIDAY — NO PENALTIES ACTIVE ]</span>
+              <button
+                onClick={() => {
+                  const todayStr = getTodayString();
+                  storage.removeItem(`holiday:${todayStr}`);
+                  setIsTodayHoliday(false);
+                }}
+                className="end-shift-btn"
+                style={{
+                  background: 'var(--bg-terminal)',
+                  border: '1px solid var(--accent-amber)',
+                  color: 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '11px',
+                  fontWeight: 'bold',
+                  padding: '2px 8px',
+                  cursor: 'pointer',
+                  boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                  transition: 'all 0.2s',
+                  textTransform: 'uppercase'
+                }}
+              >
+                [ UNMARK ]
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Missed Task Penalty Warning Banner */}
         {showPenaltyBanner && (() => {
           const yesterday = getYesterdayString();
@@ -3944,7 +5537,7 @@ export default function App() {
                   }
                 });
               }
-            } catch {}
+            } catch { }
           }
 
           if (missedPenalizedCount === 0) return null;
@@ -3962,7 +5555,7 @@ export default function App() {
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span>[!] OPERATIONAL ANOMALY: MISSED {missedPenalizedCount} CRITICAL TASKS YESTERDAY. PENALTY APPLIED: -{totalPenalty} XP.</span>
-                <button 
+                <button
                   onClick={() => setShowPenaltyBanner(false)}
                   style={{
                     background: 'none',
@@ -3984,7 +5577,7 @@ export default function App() {
         {/* Weekly Report Banner */}
         {weeklyReview && !isWeeklyReviewDismissed && (() => {
           const isoWeek = getISOWeekString();
-          
+
           let borderLeftColor = 'var(--accent-green)';
           let badgeColor = 'var(--accent-green)';
           if (weeklyReview.threatLevel === 'AMBER') {
@@ -3994,7 +5587,7 @@ export default function App() {
             borderLeftColor = 'var(--accent-coral)';
             badgeColor = 'var(--accent-coral)';
           }
-  
+
           return (
             <div style={{
               background: 'var(--bg-card)',
@@ -4052,9 +5645,16 @@ export default function App() {
         {activePage === 'home' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {renderScheduleBlock()}
+            {renderUpcomingEventsWidget()}
             {renderTodaysBriefing()}
             {renderPriorityMissions()}
             {renderMainObjectiveCard()}
+          </div>
+        )}
+
+        {activePage === 'calendar' && (
+          <div>
+            {renderCalendar()}
           </div>
         )}
 
@@ -4096,7 +5696,97 @@ export default function App() {
             {renderMissionLogs()}
           </div>
         )}
+
+        {activePage === 'manage' && (
+          <div>
+            {renderManagePage()}
+          </div>
+        )}
       </main>
+
+      {/* MOBILE BOTTOM NAVIGATION */}
+      <nav className="bottom-nav">
+        <button
+          className={`bottom-nav-btn ${activePage === 'home' ? 'active' : ''}`}
+          onClick={() => setActivePage('home')}
+          title="HOME"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">🏠</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'calendar' ? 'active' : ''}`}
+          onClick={() => setActivePage('calendar')}
+          title="CALENDAR"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">📅</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'missions' ? 'active' : ''}`}
+          onClick={() => setActivePage('missions')}
+          title="MISSIONS"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">⚔️</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'projects' ? 'active' : ''}`}
+          onClick={() => setActivePage('projects')}
+          title="PROJECTS"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">📁</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'schedule' ? 'active' : ''}`}
+          onClick={() => setActivePage('schedule')}
+          title="SCHEDULE"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">🗓️</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'skillmap' ? 'active' : ''}`}
+          onClick={() => setActivePage('skillmap')}
+          title="SKILL MAP"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">🗺️</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'character' ? 'active' : ''}`}
+          onClick={() => setActivePage('character')}
+          title="CHARACTER"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">👤</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'logs' ? 'active' : ''}`}
+          onClick={() => setActivePage('logs')}
+          title="LOGS"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">📊</span>
+        </button>
+        <button
+          className={`bottom-nav-btn ${activePage === 'manage' ? 'active' : ''}`}
+          onClick={() => setActivePage('manage')}
+          title="MANAGE"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon">✎</span>
+        </button>
+        <button
+          className="bottom-nav-btn end-shift-mobile-btn"
+          onClick={handleEndShift}
+          title="END SHIFT"
+          style={{ touchAction: 'manipulation' }}
+        >
+          <span className="bottom-nav-icon font-mono">{isDayClosed ? 'AAR' : 'END'}</span>
+        </button>
+      </nav>
 
       {/* End of Day AI Debrief Modal */}
       {showDebriefModal && (
@@ -4121,6 +5811,32 @@ export default function App() {
             color: 'var(--accent-amber)',
             position: 'relative'
           }}>
+            {!debriefLoading && (
+              <button
+                onClick={closeDebriefModal}
+                style={{
+                  position: 'absolute',
+                  top: '12px',
+                  right: '12px',
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '20px',
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                  width: '44px',
+                  height: '44px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  touchAction: 'manipulation',
+                  zIndex: 1000000
+                }}
+              >
+                [X]
+              </button>
+            )}
             <div style={{
               borderBottom: '1px dashed var(--accent-amber)',
               paddingBottom: '12px',
@@ -4144,11 +5860,11 @@ export default function App() {
                 [!] COMMS ERROR: UNABLE TO CONTACT COMMANDER. SILENT GATEWAY.
               </div>
             ) : (
-              <div style={{ 
-                whiteSpace: 'pre-wrap', 
-                fontSize: '13px', 
-                lineHeight: '1.6', 
-                maxHeight: '400px', 
+              <div style={{
+                whiteSpace: 'pre-wrap',
+                fontSize: '13px',
+                lineHeight: '1.6',
+                maxHeight: '400px',
                 overflowY: 'auto',
                 paddingRight: '10px'
               }}>
@@ -4164,7 +5880,7 @@ export default function App() {
                 borderTop: '1px dashed var(--border-color)',
                 paddingTop: '16px'
               }}>
-                <button 
+                <button
                   onClick={closeDebriefModal}
                   style={{
                     background: 'var(--bg-terminal)',
@@ -4233,7 +5949,7 @@ export default function App() {
             <div style={{ fontSize: '20px', fontWeight: 'bold', margin: '20px 0', color: 'var(--accent-green)' }}>
               TOTAL PROJECT REWARD: +{completedProjectModal.totalXp} XP
             </div>
-            <button 
+            <button
               onClick={() => setCompletedProjectModal({ show: false, projectName: '', totalXp: 0 })}
               style={{
                 background: 'var(--bg-terminal)',
@@ -4257,6 +5973,286 @@ export default function App() {
             >
               [ DISMISS COMMS ]
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Mark Holiday Modal */}
+      {showHolidayModal && (
+        <div className="debrief-modal-overlay" style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(7, 8, 10, 0.95)',
+          zIndex: 150000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px'
+        }}>
+          <div className="debrief-modal-box" style={{
+            width: '100%',
+            maxWidth: '400px',
+            background: 'var(--bg-card)',
+            border: '2px solid var(--accent-amber)',
+            padding: '24px',
+            boxShadow: '0 0 20px var(--accent-amber-glow)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--accent-amber)',
+            position: 'relative'
+          }}>
+            <div style={{
+              borderBottom: '1px dashed var(--accent-amber)',
+              paddingBottom: '12px',
+              marginBottom: '16px',
+              fontWeight: 'bold',
+              fontSize: '16px',
+              letterSpacing: '0.05em'
+            }}>
+              &gt; MARK DAY AS HOLIDAY
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>DATE</label>
+                <input
+                  type="date"
+                  className="dark-date-picker"
+                  value={holidayDate}
+                  onChange={(e) => setHolidayDate(e.target.value)}
+                  style={{ width: '100%' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>REASON (OPTIONAL)</label>
+                <input
+                  type="text"
+                  placeholder="e.g. WiFi down, travel, rest day"
+                  className="dark-date-picker"
+                  value={holidayReason}
+                  onChange={(e) => setHolidayReason(e.target.value)}
+                  style={{ width: '100%', fontFamily: 'var(--font-mono)', letterSpacing: '0.05em' }}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '12px' }}>
+              <button
+                onClick={() => setShowHolidayModal(false)}
+                style={{
+                  background: 'var(--bg-terminal)',
+                  border: '1px solid var(--text-muted)',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  padding: '6px 16px',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase'
+                }}
+              >
+                [ CANCEL ]
+              </button>
+              <button
+                onClick={() => {
+                  if (holidayDate) {
+                    storage.setItem(`holiday:${holidayDate}`, JSON.stringify({
+                      reason: holidayReason || 'Holiday',
+                      markedAt: new Date().toISOString()
+                    }));
+                    if (holidayDate === getTodayString()) {
+                      setIsTodayHoliday(true);
+                    }
+                    setShowHolidayModal(false);
+                  }
+                }}
+                style={{
+                  background: 'var(--bg-terminal)',
+                  border: '1px solid var(--accent-amber)',
+                  color: 'var(--accent-amber)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  padding: '6px 16px',
+                  cursor: 'pointer',
+                  textTransform: 'uppercase'
+                }}
+              >
+                [ CONFIRM ]
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Event System Modal */}
+      {showEventModal && (
+        <div className="debrief-modal-overlay" style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(7, 8, 10, 0.95)',
+          zIndex: 150000,
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          padding: '20px'
+        }}>
+          <div className="debrief-modal-box" style={{
+            width: '100%',
+            maxWidth: '450px',
+            background: 'var(--bg-card)',
+            border: '2px solid var(--accent-amber)',
+            padding: '24px',
+            boxShadow: '0 0 20px var(--accent-amber-glow)',
+            fontFamily: 'var(--font-mono)',
+            color: 'var(--accent-amber)',
+            position: 'relative'
+          }}>
+            <div style={{
+              borderBottom: '1px dashed var(--accent-amber)',
+              paddingBottom: '12px',
+              marginBottom: '16px',
+              fontWeight: 'bold',
+              fontSize: '16px',
+              letterSpacing: '0.05em'
+            }}>
+              &gt; {editingEventId ? 'EDIT EVENT' : 'CREATE EVENT'}
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', marginBottom: '24px' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>EVENT NAME</label>
+                <input
+                  type="text"
+                  placeholder="e.g. Physics Exam, Travel, Rest Day"
+                  className="dark-date-picker"
+                  value={eventName}
+                  onChange={(e) => setEventName(e.target.value)}
+                  style={{ width: '100%', fontFamily: 'var(--font-mono)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>START DATE</label>
+                  <input
+                    type="date"
+                    className="dark-date-picker"
+                    value={eventStartDate}
+                    onChange={(e) => setEventStartDate(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
+                  <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>END DATE</label>
+                  <input
+                    type="date"
+                    className="dark-date-picker"
+                    value={eventEndDate}
+                    onChange={(e) => setEventEndDate(e.target.value)}
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '13px', color: 'var(--text-main)' }}>MISSIONS ACTIVE</span>
+                <button
+                  onClick={() => setEventMissionsActive(!eventMissionsActive)}
+                  className="end-shift-btn"
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: `1px solid ${eventMissionsActive ? 'var(--accent-green)' : 'var(--accent-coral)'}`,
+                    color: eventMissionsActive ? 'var(--accent-green)' : 'var(--accent-coral)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '11px',
+                    padding: '2px 8px',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {eventMissionsActive ? '[ ON ]' : '[ OFF ]'}
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <label style={{ fontSize: '12px', color: 'var(--text-muted)' }}>COLOR TAG</label>
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  {['amber', 'red', 'green', 'blue'].map(c => {
+                    let btnColor = 'var(--accent-amber)';
+                    if (c === 'red') btnColor = 'var(--accent-coral)';
+                    else if (c === 'green') btnColor = 'var(--accent-green)';
+                    else if (c === 'blue') btnColor = 'var(--accent-blue)';
+
+                    return (
+                      <button
+                        key={c}
+                        onClick={() => setEventColor(c)}
+                        style={{
+                          width: '24px',
+                          height: '24px',
+                          borderRadius: '50%',
+                          background: btnColor,
+                          border: eventColor === c ? '2px solid var(--text-main)' : 'none',
+                          cursor: 'pointer',
+                          boxShadow: eventColor === c ? `0 0 8px ${btnColor}` : 'none'
+                        }}
+                      ></button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              {editingEventId ? (
+                <button
+                  onClick={handleDeleteEvent}
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--accent-coral)',
+                    color: 'var(--accent-coral)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '12px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ DELETE ]
+                </button>
+              ) : <div></div>}
+
+              <div style={{ display: 'flex', gap: '12px' }}>
+                <button
+                  onClick={() => setShowEventModal(false)}
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--text-muted)',
+                    color: 'var(--text-muted)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '12px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ CANCEL ]
+                </button>
+                <button
+                  onClick={handleSaveEvent}
+                  style={{
+                    background: 'var(--bg-terminal)',
+                    border: '1px solid var(--accent-amber)',
+                    color: 'var(--accent-amber)',
+                    fontFamily: 'var(--font-mono)',
+                    fontSize: '12px',
+                    padding: '6px 16px',
+                    cursor: 'pointer',
+                    textTransform: 'uppercase'
+                  }}
+                >
+                  [ SAVE ]
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
