@@ -3761,17 +3761,53 @@ export default function App() {
                         paddingBottom: '8px'
                       }}
                     >
-                      <span
-                        className="day-date"
-                        style={{
-                          fontFamily: 'var(--font-mono)',
-                          fontSize: '14px',
-                          color: 'var(--accent-amber)',
-                          fontWeight: 'bold'
-                        }}
-                      >
-                        📅 LOG_DATE: {lookupDate}
-                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center' }}>
+                        <span
+                          className="day-date"
+                          style={{
+                            fontFamily: 'var(--font-mono)',
+                            fontSize: '14px',
+                            color: 'var(--accent-amber)',
+                            fontWeight: 'bold'
+                          }}
+                        >
+                          📅 LOG_DATE: {lookupDate}
+                        </span>
+                        {storedDebrief && (
+                          <button
+                            onClick={() => {
+                              setDebriefText(storedDebrief);
+                              setDebriefError(false);
+                              setDebriefLoading(false);
+                              setShowDebriefModal(true);
+                            }}
+                            className="debrief-view-btn"
+                            style={{
+                              background: 'var(--bg-terminal)',
+                              border: '1px solid var(--accent-amber)',
+                              color: 'var(--accent-amber)',
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '11px',
+                              padding: '2px 8px',
+                              cursor: 'pointer',
+                              marginLeft: '12px',
+                              boxShadow: '0 0 5px rgba(245, 166, 35, 0.2)',
+                              textTransform: 'uppercase',
+                              transition: 'all 0.2s'
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.background = 'var(--accent-amber)';
+                              e.currentTarget.style.color = 'var(--bg-terminal)';
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.background = 'var(--bg-terminal)';
+                              e.currentTarget.style.color = 'var(--accent-amber)';
+                            }}
+                          >
+                            [ VIEW DEBRIEF ]
+                          </button>
+                        )}
+                      </div>
                       <span
                         className="day-total-xp"
                         style={{
