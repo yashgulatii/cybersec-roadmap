@@ -26,14 +26,6 @@ const getSafeStorage = () => {
         console.warn("window.storage.getItem/get failed for key:", key, e);
       }
 
-      try {
-        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
-          return localStorage.getItem(key);
-        }
-      } catch (e) {
-        console.warn("localStorage.getItem failed for key:", key, e);
-      }
-
       return memoryStorage[key] !== undefined ? memoryStorage[key] : null;
     },
     setItem(key, value) {
@@ -53,14 +45,6 @@ const getSafeStorage = () => {
       } catch (e) {
         console.warn("window.storage.setItem/set failed for key:", key, e);
       }
-
-      try {
-        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
-          localStorage.setItem(key, value);
-        }
-      } catch (e) {
-        console.warn("localStorage.setItem failed for key:", key, e);
-      }
     },
     removeItem(key) {
       try {
@@ -79,33 +63,11 @@ const getSafeStorage = () => {
       } catch (e) {
         console.warn("window.storage.removeItem/delete failed for key:", key, e);
       }
-
-      try {
-        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
-          localStorage.removeItem(key);
-        }
-      } catch (e) {
-        console.warn("localStorage.removeItem failed for key:", key, e);
-      }
     },
     key(index) {
-      try {
-        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
-          return localStorage.key(index);
-        }
-      } catch (e) {
-        console.warn("localStorage.key lookup failed at index:", index, e);
-      }
       return Object.keys(memoryStorage)[index] || null;
     },
     get length() {
-      try {
-        if (hasWindow && typeof localStorage !== 'undefined' && localStorage) {
-          return localStorage.length;
-        }
-      } catch (e) {
-        console.warn("localStorage.length check failed:", e);
-      }
       return Object.keys(memoryStorage).length;
     }
   };
@@ -1700,148 +1662,7 @@ export default function App() {
           const today = getTodayString();
           const yesterday = getYesterdayString();
 
-          let resolvedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
-          if (remoteData.profile) {
-            resolvedProfile = { ...remoteData.profile };
-            const lastActive = resolvedProfile.lastActiveDate;
-            if (lastActive) {
-              if (lastActive === today || lastActive === yesterday) {
-                // Streak is maintained
-              } else {
-                resolvedProfile.streak = 0;
-              }
-            } else {
-              resolvedProfile.streak = 0;
-            }
-          }
-
-          // Restore today's daily state
-          let resolvedState = { completedTaskIds: [], unlockedChainSteps: {} };
-          if (remoteData.profile && remoteData.profile.lastActiveDate === today) {
-            if (remoteData.stateToday) {
-              resolvedState = {
-                completedTaskIds: Array.isArray(remoteData.stateToday.completedTaskIds) ? remoteData.stateToday.completedTaskIds : [],
-                unlockedChainSteps: (remoteData.stateToday.unlockedChainSteps && typeof remoteData.stateToday.unlockedChainSteps === 'object') ? remoteData.stateToday.unlockedChainSteps : {}
-              };
-            }
-          }
-
-          // Restore chainProgress
-          let resolvedChainProgress = {
-            'NETWORKING': 0,
-            'LINUX': 0,
-            'SOC OPERATIONS': 0,
-            'WEB SECURITY': 0,
-            'TOOLS MASTERY': 0,
-            'ACTIVE DIRECTORY': 0,
-            'INTERVIEW PREP': 0,
-            'THM / LABS': 0
-          };
-
-          let localChainProgress = {};
-          const localSaved = storage.getItem('chainProgress');
-          if (localSaved) {
-            try {
-              const parsed = JSON.parse(localSaved);
-              if (parsed && typeof parsed === 'object') {
-                localChainProgress = parsed;
-              }
-            } catch (e) {
-              console.error("Failed to parse local chainProgress", e);
-            }
-          }
-
-          Object.keys(resolvedChainProgress).forEach(key => {
-            const remoteVal = (remoteData.chainProgress && remoteData.chainProgress[key] !== undefined) ? remoteData.chainProgress[key] : 0;
-            const localVal = localChainProgress[key] !== undefined ? localChainProgress[key] : 0;
-            resolvedChainProgress[key] = Math.max(localVal, remoteVal);
-          });
-
-          // Scan all past states and logs in storage to ensure all previous completed chain tasks are accounted for
-          try {
-            const allKeys = [];
-            for (let i = 0; i < storage.length; i++) {
-              const k = storage.key(i);
-              if (k && (k.startsWith('state:') || k.startsWith('log:'))) {
-                allKeys.push(k);
-              }
-            }
-            allKeys.forEach(k => {
-              const raw = storage.getItem(k);
-              if (raw) {
-                if (k.startsWith('state:')) {
-                  const parsed = JSON.parse(raw);
-                  if (parsed && Array.isArray(parsed.completedTaskIds)) {
-                    parsed.completedTaskIds.forEach(id => {
-                      if (id.startsWith('chain:')) {
-                        const parts = id.split(':');
-                        if (parts.length === 3) {
-                          const chainName = parts[1];
-                          const stepIdx = parseInt(parts[2], 10);
-                          if (resolvedChainProgress[chainName] !== undefined) {
-                            resolvedChainProgress[chainName] = Math.max(resolvedChainProgress[chainName], stepIdx + 1);
-                          }
-                        }
-                      }
-                    });
-                  }
-                } else if (k.startsWith('log:')) {
-                  const parsed = JSON.parse(raw);
-                  if (parsed && Array.isArray(parsed)) {
-                    parsed.forEach(entry => {
-                      if (entry.type === 'completed' && entry.taskName) {
-                        Object.keys(CHAINS).forEach(chainName => {
-                          const stepIdx = CHAINS[chainName].findIndex(step => step.title === entry.taskName);
-                          if (stepIdx !== -1) {
-                            resolvedChainProgress[chainName] = Math.max(resolvedChainProgress[chainName], stepIdx + 1);
-                          }
-                        });
-                      }
-                    });
-                  }
-                }
-              }
-            });
-          } catch (e) {
-            console.error("Failed to reconstruct resolvedChainProgress from historical states/logs", e);
-          }
-
-          // Restore completion times
-          let resolvedCompletionTimes = {};
-          if (remoteData.completionTimesToday && typeof remoteData.completionTimesToday === 'object') {
-            resolvedCompletionTimes = remoteData.completionTimesToday;
-          }
-          storage.setItem(`completion_times:${today}`, JSON.stringify(resolvedCompletionTimes));
-
-          // Restore logs
-          if (remoteData.logs) {
-            Object.keys(remoteData.logs).forEach(k => {
-              storage.setItem(k, remoteData.logs[k]);
-            });
-          }
-
-          // Restore debriefs
-          if (remoteData.debriefs) {
-            Object.keys(remoteData.debriefs).forEach(k => {
-              storage.setItem(k, remoteData.debriefs[k]);
-            });
-          }
-
-          // Restore dayClosed
-          if (remoteData.dayClosed) {
-            Object.keys(remoteData.dayClosed).forEach(k => {
-              storage.setItem(k, remoteData.dayClosed[k]);
-            });
-          }
-
-          // Restore flavors
-          if (remoteData.flavors) {
-            Object.keys(remoteData.flavors).forEach(k => {
-              storage.setItem(k, remoteData.flavors[k]);
-            });
-          }
-
-          // Restore holidays
+          // 1. Restore holidays
           if (remoteData.holidays) {
             Object.keys(remoteData.holidays).forEach(k => {
               if (k.startsWith('holiday:')) {
@@ -1875,19 +1696,18 @@ export default function App() {
           }
 
           // Force update fixedTasks list state
-          if (Array.isArray(remoteData.customFixedTasks) || Array.isArray(remoteData.deletedTaskIds)) {
-            const defaultTasks = FIXED_TASKS.filter(t => t.id !== 'fixed:update_linkedin');
-            const merged = [...defaultTasks];
-            resolvedCustomFixedTasks.forEach(c => {
-              const idx = merged.findIndex(t => t.id === c.id);
-              if (idx !== -1) {
-                merged[idx] = c;
-              } else {
-                merged.push(c);
-              }
-            });
-            setFixedTasks(merged.filter(t => !resolvedDeletedTaskIds.includes(t.id)));
-          }
+          const defaultTasks = FIXED_TASKS.filter(t => t.id !== 'fixed:update_linkedin');
+          const merged = [...defaultTasks];
+          resolvedCustomFixedTasks.forEach(c => {
+            const idx = merged.findIndex(t => t.id === c.id);
+            if (idx !== -1) {
+              merged[idx] = c;
+            } else {
+              merged.push(c);
+            }
+          });
+          const activeFixedTasks = merged.filter(t => !resolvedDeletedTaskIds.includes(t.id));
+          setFixedTasks(activeFixedTasks);
 
           // Restore customChains
           if (remoteData.customChains && typeof remoteData.customChains === 'object') {
@@ -1925,14 +1745,180 @@ export default function App() {
           setProjectProgress(resolvedProjectProgress);
           storage.setItem('projectProgress', JSON.stringify(resolvedProjectProgress));
 
-          setDailyState(resolvedState);
-          storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
+          // Restore debriefs
+          if (remoteData.debriefs) {
+            Object.keys(remoteData.debriefs).forEach(k => {
+              storage.setItem(k, remoteData.debriefs[k]);
+            });
+          }
 
-          setChainProgress(resolvedChainProgress);
-          storage.setItem('chainProgress', JSON.stringify(resolvedChainProgress));
+          // Restore dayClosed
+          if (remoteData.dayClosed) {
+            Object.keys(remoteData.dayClosed).forEach(k => {
+              storage.setItem(k, remoteData.dayClosed[k]);
+            });
+          }
 
-          setProfile(resolvedProfile);
-          storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
+          // Restore flavors
+          if (remoteData.flavors) {
+            Object.keys(remoteData.flavors).forEach(k => {
+              storage.setItem(k, remoteData.flavors[k]);
+            });
+          }
+
+          // Restore logs
+          if (remoteData.logs) {
+            Object.keys(remoteData.logs).forEach(k => {
+              storage.setItem(k, remoteData.logs[k]);
+            });
+          }
+
+          // 2. Profile resolution & Streak maintenance
+          let resolvedProfile = { level: 1, totalXp: 0, streak: 0, lastActiveDate: '' };
+          if (remoteData.profile) {
+            resolvedProfile = { ...remoteData.profile };
+            const lastActive = resolvedProfile.lastActiveDate;
+            if (lastActive) {
+              if (lastActive === today || lastActive === yesterday) {
+                // Streak is maintained
+              } else {
+                resolvedProfile.streak = 0;
+              }
+            } else {
+              resolvedProfile.streak = 0;
+            }
+          }
+
+          // 3. Day Transition or Today State Restore
+          let resolvedState = { completedTaskIds: [], unlockedChainSteps: {} };
+          let resolvedChainProgress = {
+            'NETWORKING': 0,
+            'LINUX': 0,
+            'SOC OPERATIONS': 0,
+            'WEB SECURITY': 0,
+            'TOOLS MASTERY': 0,
+            'ACTIVE DIRECTORY': 0,
+            'INTERVIEW PREP': 0,
+            'THM / LABS': 0,
+            ...(remoteData.chainProgress || {})
+          };
+
+          const lastActiveDate = resolvedProfile.lastActiveDate;
+          const dayTransitionNeeded = lastActiveDate && lastActiveDate !== today;
+
+          if (dayTransitionNeeded) {
+            // Day has transitioned! Compile logs for yesterday
+            const completedYesterday = remoteData.stateToday ? (remoteData.stateToday.completedTaskIds || []) : [];
+            const yesterdayTimes = remoteData.completionTimesToday || {};
+
+            // Advance chainProgress for chain tasks completed yesterday
+            for (const taskId of completedYesterday) {
+              for (const [chainId, chain] of Object.entries(CHAINS)) {
+                const tasksArray = Array.isArray(chain) ? chain : (chain.tasks || []);
+                let stepIndex = -1;
+                if (taskId.startsWith(`chain:${chainId}:`)) {
+                  stepIndex = parseInt(taskId.split(':')[2], 10);
+                } else {
+                  stepIndex = tasksArray.findIndex(t => t.id === taskId);
+                }
+
+                if (stepIndex !== -1) {
+                  const currentStep = resolvedChainProgress[chainId] || 0;
+                  if (stepIndex === currentStep) {
+                    resolvedChainProgress[chainId] = currentStep + 1;
+                  }
+                }
+              }
+            }
+
+            const isYesterdayHoliday = storage.getItem(`holiday:${lastActiveDate}`) !== null;
+            const isYesterdaySuppressed = remoteData.events && remoteData.events.some(evt =>
+              evt.missionsActive === false && lastActiveDate >= evt.startDate && lastActiveDate <= evt.endDate
+            );
+
+            // Compile logs
+            const logEntries = [];
+            activeFixedTasks.forEach(task => {
+              const isCompleted = completedYesterday.includes(task.id);
+              if (isCompleted) {
+                logEntries.push({
+                  taskName: task.title,
+                  tag: task.category,
+                  xp: task.xp,
+                  completedAt: yesterdayTimes[task.id] || `${lastActiveDate}T12:00:00.000Z`,
+                  type: 'completed'
+                });
+              } else if (!isYesterdayHoliday && !isYesterdaySuppressed) {
+                const isMissedPenalized = ['ROADMAP', 'COMMS', 'DISCIPLINE'].includes(task.category);
+                logEntries.push({
+                  taskName: task.title,
+                  tag: task.category,
+                  xp: task.xp,
+                  completedAt: null,
+                  type: 'missed',
+                  ...(isMissedPenalized ? { xpPenalty: -Math.floor(task.xp * 0.5) } : {})
+                });
+              }
+            });
+
+            completedYesterday.forEach(taskId => {
+              if (taskId.startsWith('chain:')) {
+                const parts = taskId.split(':');
+                if (parts.length === 3) {
+                  const chainName = parts[1];
+                  const stepIdx = parseInt(parts[2], 10);
+                  const chain = CHAINS[chainName];
+                  if (chain && chain[stepIdx]) {
+                    const stepTask = chain[stepIdx];
+                    logEntries.push({
+                      taskName: stepTask.title,
+                      tag: stepTask.category,
+                      xp: stepTask.xp,
+                      completedAt: yesterdayTimes[taskId] || `${lastActiveDate}T12:00:00.000Z`,
+                      type: 'completed'
+                    });
+                  }
+                }
+              }
+            });
+
+            storage.setItem(`log:${lastActiveDate}`, JSON.stringify(logEntries));
+            storage.removeItem(`completion_times:${lastActiveDate}`);
+
+            // Fresh today completion times
+            storage.setItem(`completion_times:${today}`, JSON.stringify({}));
+            storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
+            storage.setItem('chainProgress', JSON.stringify(resolvedChainProgress));
+
+            setDailyState(resolvedState);
+            setChainProgress(resolvedChainProgress);
+            setProfile(resolvedProfile);
+            storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
+
+            // Sync newly transitioned state package to Cloudflare KV
+            saveProgressToServer(password, resolvedState, resolvedProfile, resolvedChainProgress, {});
+          } else {
+            // No day transition needed: just restore today's values
+            if (remoteData.stateToday) {
+              resolvedState = {
+                completedTaskIds: Array.isArray(remoteData.stateToday.completedTaskIds) ? remoteData.stateToday.completedTaskIds : [],
+                unlockedChainSteps: (remoteData.stateToday.unlockedChainSteps && typeof remoteData.stateToday.unlockedChainSteps === 'object') ? remoteData.stateToday.unlockedChainSteps : {}
+              };
+            }
+
+            let resolvedCompletionTimes = {};
+            if (remoteData.completionTimesToday && typeof remoteData.completionTimesToday === 'object') {
+              resolvedCompletionTimes = remoteData.completionTimesToday;
+            }
+            storage.setItem(`completion_times:${today}`, JSON.stringify(resolvedCompletionTimes));
+            storage.setItem(`state:${today}`, JSON.stringify(resolvedState));
+            storage.setItem('chainProgress', JSON.stringify(resolvedChainProgress));
+            storage.setItem('operator_profile', JSON.stringify(resolvedProfile));
+
+            setDailyState(resolvedState);
+            setChainProgress(resolvedChainProgress);
+            setProfile(resolvedProfile);
+          }
 
           // Dynamically update closed and flavor states based on restored package
           const todayClosed = storage.getItem(`dayClosed:${today}`) === 'true';
