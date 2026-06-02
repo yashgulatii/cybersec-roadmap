@@ -1,0 +1,7 @@
+# wrangler.toml
+# Cloudflare Pages / Workers configuration for the TAC-NET operator dashboard.
+
+[[kv_namespaces]]
+binding = "TACNET_KV"
+id = "tacnet-kv-namespace-id"
+preview_id = "tacnet-kv-preview-id"
